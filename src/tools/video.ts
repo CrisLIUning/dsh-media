@@ -14,7 +14,7 @@ import { VIDEO_INPUTS, VIDEO_MODES } from '../gateway/catalog.js'
 import { MediaError } from '../gateway/errors.js'
 import type { UploadedAsset } from '../gateway/assets.js'
 import { estimateVideo, yuan } from '../pricing.js'
-import type { MediaRuntime } from '../runtime.js'
+import type { MediaCall, MediaRuntime } from '../runtime.js'
 import type { TaskRecord } from '../tasks/store.js'
 import { INPUT_KIND, INPUT_PARAM, checkReferenceDurations, checkReferenceFile, planVideo, referenceByteLimit, videoRequestBody } from '../video/plan.js'
 import type { VideoPlan, VideoRequestOptions } from '../video/plan.js'
@@ -72,6 +72,98 @@ async function mapLimited<T, R>(items: readonly T[], limit: number, run: (item: 
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
   return results
+}
+
+/** One video request, as the tool and host callers make it. */
+export interface VideoRequest extends VideoRequestOptions {
+  readonly model?: string
+}
+
+/** A video request checked, uploaded and priced, ready to submit. */
+export interface PreparedVideo {
+  readonly model: MediaModel
+  readonly plan: VideoPlan
+  /** The task to submit (status `submitting`). */
+  readonly draft: TaskRecord
+  /** One entry per uploaded input, in request order. */
+  readonly inputs: readonly VideoInput[]
+  /** `5 s, 16:9, 720p`, for messages. */
+  readonly shape: string
+}
+
+/**
+ * Everything before a video submission: choose a model that can serve the
+ * request, load and check every input, upload them all to the gateway media
+ * library, check the measured reference lengths, price it, confirm the
+ * spending, and build the task.
+ * @param runtime - the media runtime.
+ * @param call - the tool call or host call.
+ * @param request - what to generate.
+ * @param save - where the finished video goes: the folder and the file-name stem.
+ * @returns the prepared task.
+ */
+export async function prepareVideoTask(
+  runtime: MediaRuntime,
+  call: MediaCall,
+  request: VideoRequest,
+  save: { readonly folder: string; readonly stem: string },
+): Promise<PreparedVideo> {
+  const { model: requested, ...options } = request
+  const { model, plan } = await chooseModel(runtime, requested, options, call.signal)
+
+  // Load and check every input before anything is uploaded, then upload them all.
+  const sources: Array<{ input: VideoInput; source: string }> = []
+  for (const input of VIDEO_INPUTS) for (const source of plan.inputs[input] ?? []) sources.push({ input, source })
+  const loaded = []
+  for (const { input, source } of sources) {
+    const media = await runtime.load(call, source, INPUT_KIND[input], referenceByteLimit(model, input))
+    checkReferenceFile(model, input, { source: media.source, mime: media.mime, bytes: media.data.byteLength })
+    loaded.push({ input, media })
+  }
+  // One failed upload stops the others: the request cannot be sent without every reference.
+  const uploads = new AbortController()
+  const relay = (): void => { uploads.abort(call.signal.reason) }
+  call.signal.addEventListener('abort', relay, { once: true })
+  let assets: UploadedAsset[]
+  try {
+    assets = await mapLimited(loaded, UPLOAD_CONCURRENCY, async ({ media }) => {
+      try {
+        return await runtime.library.upload(media, 'video_reference', uploads.signal)
+      } catch (error) {
+        uploads.abort(error)
+        throw error
+      }
+    })
+  } finally {
+    call.signal.removeEventListener('abort', relay)
+  }
+  const videos = loaded.flatMap((item, index) => item.input === 'referenceVideos'
+    ? [{ source: item.media.source, mime: item.media.mime, bytes: item.media.data.byteLength, ...assets[index]?.durationMs === undefined ? {} : { durationMs: assets[index]?.durationMs as number } }]
+    : [])
+  checkReferenceDurations(model, videos)
+  const urls: Partial<Record<VideoInput, string[]>> = {}
+  for (const [index, item] of loaded.entries()) {
+    const asset = assets[index] as UploadedAsset
+    ;(urls[item.input] ??= []).push(asset.referenceUrl)
+  }
+
+  const referenceMs = videos.reduce((sum, clip) => sum + (clip.durationMs ?? 0), 0)
+  const estimate = estimateVideo(model, plan.duration, plan.resolution, referenceMs)
+  const shape = [plan.duration === undefined ? undefined : `${plan.duration} s`, plan.aspectRatio, plan.resolution].filter(Boolean).join(', ')
+  await runtime.confirmSpending(call, 'video_generate', {
+    en: `Generate a video with ${model.id} (${plan.mode}${shape === '' ? '' : `, ${shape}`})${estimate === undefined ? '' : `, about ${yuan(estimate.amountCny)} (${estimate.basis})`}. Charged only if it succeeds.`,
+    zh: `用 ${model.id} 生成视频（${plan.mode}${shape === '' ? '' : `，${shape}`}）${estimate === undefined ? '' : `，约 ${yuan(estimate.amountCny)}`}，成功才扣费。`,
+  })
+
+  const now = runtime.now()
+  const draft: TaskRecord = {
+    id: randomUUID(), kind: 'video', model: model.id, label: excerpt(request.prompt), createdAt: now, updatedAt: now,
+    ...call.agent === undefined ? {} : { owner: call.agent.id },
+    outputDir: save.folder, stem: save.stem,
+    endpoint: '/v1/videos', body: videoRequestBody(model.id, request.prompt, plan, urls), status: 'submitting',
+    ...estimate === undefined ? {} : { estimatedCny: estimate.amountCny.toFixed(2) },
+  }
+  return { model, plan, draft, inputs: loaded.map(item => item.input), shape }
 }
 
 /**
@@ -143,8 +235,9 @@ export function videoGenerateTool(runtime: MediaRuntime): ToolDefinition {
       render: (_args, value) => [{ type: 'text', text: value.message }],
     },
     async execute(args, exec) {
-      const options: VideoRequestOptions = {
+      const { model, plan, draft, inputs, shape } = await prepareVideoTask(runtime, exec, {
         prompt: args.prompt,
+        ...args.model === undefined ? {} : { model: args.model },
         ...args.mode === undefined ? {} : { mode: args.mode as VideoMode },
         ...args.duration === undefined ? {} : { duration: args.duration },
         ...args.aspect_ratio === undefined ? {} : { aspectRatio: args.aspect_ratio },
@@ -155,64 +248,10 @@ export function videoGenerateTool(runtime: MediaRuntime): ToolDefinition {
         ...args.reference_images === undefined ? {} : { referenceImages: args.reference_images },
         ...args.reference_videos === undefined ? {} : { referenceVideos: args.reference_videos },
         ...args.reference_audios === undefined ? {} : { referenceAudios: args.reference_audios },
-      }
-      const { model, plan } = await chooseModel(runtime, args.model, options, exec.signal)
-
-      // Load and check every input before anything is uploaded, then upload them all.
-      const inputs: Array<{ input: VideoInput; source: string }> = []
-      for (const input of VIDEO_INPUTS) for (const source of plan.inputs[input] ?? []) inputs.push({ input, source })
-      const loaded = []
-      for (const { input, source } of inputs) {
-        const media = await runtime.load(exec, source, INPUT_KIND[input], referenceByteLimit(model, input))
-        checkReferenceFile(model, input, { source: media.source, mime: media.mime, bytes: media.data.byteLength })
-        loaded.push({ input, media })
-      }
-      // One failed upload stops the others: the request cannot be sent without every reference.
-      const uploads = new AbortController()
-      const relay = (): void => { uploads.abort(exec.signal.reason) }
-      exec.signal.addEventListener('abort', relay, { once: true })
-      let assets: UploadedAsset[]
-      try {
-        assets = await mapLimited(loaded, UPLOAD_CONCURRENCY, async ({ media }) => {
-          try {
-            return await runtime.library.upload(media, 'video_reference', uploads.signal)
-          } catch (error) {
-            uploads.abort(error)
-            throw error
-          }
-        })
-      } finally {
-        exec.signal.removeEventListener('abort', relay)
-      }
-      const videos = loaded.flatMap((item, index) => item.input === 'referenceVideos'
-        ? [{ source: item.media.source, mime: item.media.mime, bytes: item.media.data.byteLength, ...assets[index]?.durationMs === undefined ? {} : { durationMs: assets[index]?.durationMs as number } }]
-        : [])
-      checkReferenceDurations(model, videos)
-      const urls: Partial<Record<VideoInput, string[]>> = {}
-      for (const [index, item] of loaded.entries()) {
-        const asset = assets[index] as UploadedAsset
-        ;(urls[item.input] ??= []).push(asset.referenceUrl)
-      }
-
-      const referenceMs = videos.reduce((sum, clip) => sum + (clip.durationMs ?? 0), 0)
-      const estimate = estimateVideo(model, plan.duration, plan.resolution, referenceMs)
-      const shape = [plan.duration === undefined ? undefined : `${plan.duration} s`, plan.aspectRatio, plan.resolution].filter(Boolean).join(', ')
-      await runtime.confirmSpending(exec, 'video_generate', {
-        en: `Generate a video with ${model.id} (${plan.mode}${shape === '' ? '' : `, ${shape}`})${estimate === undefined ? '' : `, about ${yuan(estimate.amountCny)} (${estimate.basis})`}. Charged only if it succeeds.`,
-        zh: `用 ${model.id} 生成视频（${plan.mode}${shape === '' ? '' : `，${shape}`}）${estimate === undefined ? '' : `，约 ${yuan(estimate.amountCny)}`}，成功才扣费。`,
-      })
-
-      const now = runtime.now()
-      const draft: TaskRecord = {
-        id: randomUUID(), kind: 'video', model: model.id, label: excerpt(args.prompt), createdAt: now, updatedAt: now,
-        ...exec.agent === undefined ? {} : { owner: exec.agent.id },
-        outputDir: runtime.outputFolder(exec, 'videos'), stem: runtime.stem(args.filename, args.prompt),
-        endpoint: '/v1/videos', body: videoRequestBody(model.id, args.prompt, plan, urls), status: 'submitting',
-        ...estimate === undefined ? {} : { estimatedCny: estimate.amountCny.toFixed(2) },
-      }
+      }, { folder: runtime.outputFolder(exec, 'videos'), stem: runtime.stem(args.filename, args.prompt) })
       const { record: accepted, jobId, unconfirmed } = await submitTask(runtime, exec, draft)
       const estimated = accepted.estimatedCny ?? draft.estimatedCny
-      const references = loaded.length === 0 ? '' : ` with ${loaded.length} input${loaded.length === 1 ? '' : 's'} (${[...new Set(loaded.map(item => INPUT_PARAM[item.input]))].join(', ')})`
+      const references = inputs.length === 0 ? '' : ` with ${inputs.length} input${inputs.length === 1 ? '' : 's'} (${[...new Set(inputs.map(input => INPUT_PARAM[input]))].join(', ')})`
       const summary = `${model.id}, ${plan.mode}${shape === '' ? '' : `, ${shape}`}${references}`
       const base = {
         taskId: accepted.id, model: model.id, mode: plan.mode,

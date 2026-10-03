@@ -55,6 +55,21 @@ export interface RuntimeOptions {
   readonly log?: (message: string) => void
 }
 
+/**
+ * Who a media request runs for: an agent's tool call (a {@link ToolRunContext}
+ * fits as it is), or a host caller such as the film workbench, which names the
+ * workspace itself and shows the cost in its own interface first.
+ */
+export interface MediaCall {
+  readonly signal: AbortSignal
+  readonly callId?: ToolRunContext['callId']
+  readonly agent?: ToolRunContext['agent']
+  /** The workspace, for callers without an agent session. */
+  readonly cwd?: string
+  /** The caller already showed the cost and the user chose to go ahead. */
+  readonly confirmed?: boolean
+}
+
 const CATALOG_TTL_MS = 2 * 60_000
 
 /** Wait for a shared promise under one caller's signal without cancelling it for the others. */
@@ -172,23 +187,23 @@ export class MediaRuntime {
 
   /**
    * The workspace of the calling session.
-   * @param exec - the tool call.
+   * @param call - the tool call or host call.
    * @returns its absolute working directory, when it has one.
    */
-  workspace(exec: ToolRunContext): string | undefined {
-    return exec.agent?.session.header.cwd
+  workspace(call: MediaCall): string | undefined {
+    return call.cwd ?? call.agent?.session.header.cwd
   }
 
   /**
    * The absolute folder outputs of one kind are saved in: `<workspace>/<outputDir>/<sub>`.
    * Without a workspace, the plugin state directory is used.
-   * @param exec - the tool call.
+   * @param call - the tool call or host call.
    * @param sub - `images`, `videos`, `audio` or `transcripts`.
    * @returns the folder (created on first write).
    */
-  outputFolder(exec: ToolRunContext, sub: string): string {
+  outputFolder(call: MediaCall, sub: string): string {
     const configured = this.settings.outputDir().trim() || 'media'
-    const base = isAbsolute(configured) ? configured : resolve(this.workspace(exec) ?? join(this.options.stateDir, 'outputs'), configured)
+    const base = isAbsolute(configured) ? configured : resolve(this.workspace(call) ?? join(this.options.stateDir, 'outputs'), configured)
     return join(base, sub)
   }
 
@@ -207,19 +222,19 @@ export class MediaRuntime {
 
   /**
    * A path relative to the workspace when it is inside it, for messages.
-   * @param exec - the tool call.
+   * @param call - the tool call or host call.
    * @param path - an absolute path.
    * @returns the display path.
    */
-  display(exec: ToolRunContext, path: string): string {
-    const root = this.workspace(exec)
+  display(call: MediaCall, path: string): string {
+    const root = this.workspace(call)
     if (root === undefined) return path
     const prefix = root.endsWith('/') || root.endsWith('\\') ? root : `${root}${path.includes('\\') ? '\\' : '/'}`
     return path.startsWith(prefix) ? path.slice(prefix.length).replace(/\\/g, '/') : path
   }
 
-  private reader(exec: ToolRunContext): SourceReader {
-    const cwd = this.workspace(exec)
+  private reader(call: MediaCall): SourceReader {
+    const cwd = this.workspace(call)
     return {
       readPath: async (path, maxBytes, signal) => {
         const fs = this.options.fs?.()
@@ -250,42 +265,43 @@ export class MediaRuntime {
 
   /**
    * Load one input: a `chat:` attachment, a data URL, a link, or a path in the workspace.
-   * @param exec - the tool call.
+   * @param call - the tool call or host call.
    * @param source - what the agent passed.
    * @param want - the kind the input needs.
    * @param maxBytes - the largest accepted file.
    * @returns the loaded media.
    */
-  async load(exec: ToolRunContext, source: string, want: ChatMediaKind, maxBytes: number): Promise<LoadedMedia> {
+  async load(call: MediaCall, source: string, want: ChatMediaKind, maxBytes: number): Promise<LoadedMedia> {
     const chat = parseChatReference(source)
     if (chat !== undefined) {
       const store = this.options.attachments?.()
-      const agent = exec.agent
+      const agent = call.agent
       if (store === undefined || agent === undefined) {
         throw new MediaError(`"${source}" refers to a chat attachment, but this host does not expose them; pass a file path instead.`, 'CHAT_REFERENCE_UNAVAILABLE')
       }
-      return loadChatReference(chat, want, agent.session.deriveMessages(), store, maxBytes, exec.signal)
+      return loadChatReference(chat, want, agent.session.deriveMessages(), store, maxBytes, call.signal)
     }
-    return loadMedia(source, this.reader(exec), maxBytes, exec.signal)
+    return loadMedia(source, this.reader(call), maxBytes, call.signal)
   }
 
   /**
    * Ask the user before spending, when the setting asks for it.
-   * @param exec - the tool call.
+   * @param call - the tool call or host call.
    * @param toolName - the tool asking.
    * @param what - the request and its estimated price, in English and Chinese.
    * @throws {@link MediaError} when the user declines or nobody can answer.
    */
-  async confirmSpending(exec: ToolRunContext, toolName: string, what: { en: string; zh: string }): Promise<void> {
-    if (!this.settings.confirmSpending()) return
+  async confirmSpending(call: MediaCall, toolName: string, what: { en: string; zh: string }): Promise<void> {
+    if (!this.settings.confirmSpending() || call.confirmed === true) return
     const approval = this.options.approval?.()
-    const agent = exec.agent
-    if (approval === undefined || agent === undefined) {
+    const agent = call.agent
+    const callId = call.callId
+    if (approval === undefined || agent === undefined || callId === undefined) {
       throw new MediaError('Spending confirmation is turned on in the dsh-media settings, but this host cannot ask the user. '
         + 'Nothing was submitted; the user can turn the setting off to generate without asking.', 'SPENDING_CONFIRMATION_UNAVAILABLE')
     }
     const outcome = await approval.request({
-      agent, toolName, callId: exec.callId, signal: exec.signal,
+      agent, toolName, callId, signal: call.signal,
       reason: what.en,
       displayReason: { en: what.en, zh: what.zh, 'zh-CN': what.zh },
     })

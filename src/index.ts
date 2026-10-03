@@ -31,6 +31,7 @@ import { PluginLogin } from './auth/login.js'
 import { MediaLibrary } from './gateway/assets.js'
 import { GatewayHttp } from './gateway/http.js'
 import { MediaRuntime } from './runtime.js'
+import { MediaHostService } from './service.js'
 import type { ModelSlot } from './runtime.js'
 import { TaskStore } from './tasks/store.js'
 import { TaskTracker } from './tasks/tracker.js'
@@ -44,6 +45,10 @@ import { videoGenerateTool } from './tools/video.js'
 import { stateDirectory } from './util/files.js'
 
 export { MediaError } from './gateway/errors.js'
+export { MediaHostService } from './service.js'
+export type { HostTarget, MediaTaskView } from './service.js'
+export type { ImageRequest } from './tools/image.js'
+export type { VideoRequest } from './tools/video.js'
 export { parseMediaCatalog } from './gateway/catalog.js'
 export type { MediaModel, VideoCapabilities, VideoMode } from './gateway/catalog.js'
 
@@ -162,6 +167,9 @@ export function apply(ctx: Context, config: Config): void {
     mediaModelsTool(runtime), imageGenerateTool(runtime), videoGenerateTool(runtime), audioGenerateTool(runtime),
     audioTranscribeTool(runtime), mediaTasksTool(runtime), mediaAccountTool(runtime, chain, login),
   ]) ctx.tools.register(tool)
+
+  // Other plugins (the film workbench) generate through the same runtime.
+  ctx.effect(() => ctx.provide('vibedevMedia', new MediaHostService(runtime, version)), 'dsh-media: host service')
 
   const prompt = ctx.get('systemPrompt')
   if (prompt !== undefined) {

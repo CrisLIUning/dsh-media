@@ -11,7 +11,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { MediaError } from '../gateway/errors.js'
 import { estimateImages, yuan } from '../pricing.js'
-import type { MediaRuntime } from '../runtime.js'
+import type { MediaCall, MediaRuntime } from '../runtime.js'
 import { extensionFor, loadMedia, sniffMime } from '../media/sources.js'
 import type { LoadedMedia } from '../media/sources.js'
 import { saveNewFile } from '../util/files.js'
@@ -81,6 +81,90 @@ function form(fields: Record<string, string | number | undefined>, references: r
   return body
 }
 
+/** One image request, as the tool and host callers make it. */
+export interface ImageRequest {
+  readonly prompt: string
+  readonly model?: string
+  /** `WIDTHxHEIGHT` or `auto`. */
+  readonly size?: string
+  readonly quality?: string
+  /** 1-4. */
+  readonly n?: number
+  /** Images to edit or draw from: paths, links, data URLs or `chat:` references. */
+  readonly references?: readonly string[]
+}
+
+/** One saved image. */
+export interface GeneratedImage {
+  readonly absolutePath: string
+  readonly mediaType: string
+  readonly bytes: number
+  readonly data: Uint8Array
+}
+
+/**
+ * Generate images and save them: model choice, reference checks, the spending
+ * confirmation, the gateway call and the files.
+ * @param runtime - the media runtime.
+ * @param call - the tool call or host call.
+ * @param request - what to generate.
+ * @param save - where: the folder and the file-name stem (`-2`, `-3`... for more than one).
+ * @returns the model, the saved images, the estimate and a revised prompt.
+ */
+export async function generateImages(
+  runtime: MediaRuntime,
+  call: MediaCall,
+  request: ImageRequest,
+  save: { readonly folder: string; readonly stem: string },
+): Promise<{ model: string; images: GeneratedImage[]; estimatedCny?: string; revisedPrompt?: string }> {
+  const count = Math.min(4, Math.max(1, Math.trunc(request.n ?? 1)))
+  const size = request.size?.trim().toLowerCase()
+  if (size !== undefined && size !== '' && size !== 'auto' && !SIZE.test(size)) {
+    throw new MediaError(`size "${request.size ?? ''}" is not WIDTHxHEIGHT (such as 1024x1024) or auto.`, 'IMAGE_OPTION_INVALID', { field: 'size' })
+  }
+  const sources = (request.references ?? []).map(source => source.trim()).filter(source => source !== '')
+  if (sources.length > MAX_REFERENCES) {
+    throw new MediaError(`At most ${MAX_REFERENCES} reference images can be sent; got ${sources.length}.`, 'IMAGE_OPTION_INVALID', { field: 'reference_images' })
+  }
+  const model = await runtime.pickModel('image', 'image', request.model, undefined, call.signal)
+  const references: LoadedMedia[] = []
+  for (const source of sources) {
+    const media = await runtime.load(call, source, 'image', MAX_REFERENCE_BYTES)
+    if (!REFERENCE_TYPES.includes(media.mime)) {
+      throw new MediaError(`Reference image "${media.source}" is ${media.mime}; use PNG, JPEG or WebP.`, 'REFERENCE_MEDIA_TYPE_UNSUPPORTED', { field: 'reference_images' })
+    }
+    references.push(media)
+  }
+  const estimate = estimateImages(model, count)
+  const cost = estimate === undefined ? '' : `, about ${yuan(estimate.amountCny)}`
+  await runtime.confirmSpending(call, 'image_generate', {
+    en: `Generate ${count} image${count === 1 ? '' : 's'} with ${model.id}${cost}.`,
+    zh: `用 ${model.id} 生成 ${count} 张图片${estimate === undefined ? '' : `，约 ${yuan(estimate.amountCny)}`}。`,
+  })
+  const fields = { model: model.id, prompt: request.prompt, n: count, size: size === '' ? undefined : size, quality: request.quality }
+  const answer = await runtime.http.json(references.length === 0 ? '/v1/images/generations' : '/v1/images/edits', {
+    method: 'POST',
+    ...references.length === 0
+      ? { json: Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) }
+      : { body: form(fields, references) },
+    timeoutMs: 120_000 + count * 90_000,
+    signal: call.signal,
+  })
+  const { images, revisedPrompt } = await decodeImages(runtime, answer, call.signal)
+  if (images.length === 0) throw new MediaError('The VibeDev gateway returned no image.', 'IMAGE_EMPTY')
+  const saved: GeneratedImage[] = []
+  for (const [index, image] of images.entries()) {
+    const path = await saveNewFile(save.folder, images.length > 1 ? `${save.stem}-${index + 1}` : save.stem, extensionFor(image.mime, 'png'), image.data)
+    saved.push({ absolutePath: path, mediaType: image.mime, bytes: image.data.byteLength, data: image.data })
+  }
+  return {
+    model: model.id,
+    images: saved,
+    ...estimate === undefined ? {} : { estimatedCny: estimate.amountCny.toFixed(2) },
+    ...revisedPrompt === undefined ? {} : { revisedPrompt },
+  }
+}
+
 /**
  * Build the tool.
  * @param runtime - the media runtime.
@@ -148,62 +232,32 @@ export function imageGenerateTool(runtime: MediaRuntime): ToolDefinition {
       },
     },
     async execute(args, exec) {
-      const count = Math.min(4, Math.max(1, Math.trunc(args.n ?? 1)))
-      const size = args.size?.trim().toLowerCase()
-      if (size !== undefined && size !== '' && size !== 'auto' && !SIZE.test(size)) {
-        throw new MediaError(`size "${args.size}" is not WIDTHxHEIGHT (such as 1024x1024) or auto.`, 'IMAGE_OPTION_INVALID', { field: 'size' })
-      }
-      const sources = (args.reference_images ?? []).map(source => source.trim()).filter(source => source !== '')
-      if (sources.length > MAX_REFERENCES) {
-        throw new MediaError(`At most ${MAX_REFERENCES} reference images can be sent; got ${sources.length}.`, 'IMAGE_OPTION_INVALID', { field: 'reference_images' })
-      }
-      const model = await runtime.pickModel('image', 'image', args.model, undefined, exec.signal)
-      const references: LoadedMedia[] = []
-      for (const source of sources) {
-        const media = await runtime.load(exec, source, 'image', MAX_REFERENCE_BYTES)
-        if (!REFERENCE_TYPES.includes(media.mime)) {
-          throw new MediaError(`Reference image "${media.source}" is ${media.mime}; use PNG, JPEG or WebP.`, 'REFERENCE_MEDIA_TYPE_UNSUPPORTED', { field: 'reference_images' })
-        }
-        references.push(media)
-      }
-      const estimate = estimateImages(model, count)
-      const cost = estimate === undefined ? '' : `, about ${yuan(estimate.amountCny)}`
-      await runtime.confirmSpending(exec, 'image_generate', {
-        en: `Generate ${count} image${count === 1 ? '' : 's'} with ${model.id}${cost}.`,
-        zh: `用 ${model.id} 生成 ${count} 张图片${estimate === undefined ? '' : `，约 ${yuan(estimate.amountCny)}`}。`,
-      })
-      const fields = { model: model.id, prompt: args.prompt, n: count, size: size === '' ? undefined : size, quality: args.quality }
-      const answer = await runtime.http.json(references.length === 0 ? '/v1/images/generations' : '/v1/images/edits', {
-        method: 'POST',
-        ...references.length === 0
-          ? { json: Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined)) }
-          : { body: form(fields, references) },
-        timeoutMs: 120_000 + count * 90_000,
-        signal: exec.signal,
-      })
-      const { images, revisedPrompt } = await decodeImages(runtime, answer, exec.signal)
-      if (images.length === 0) throw new MediaError('The VibeDev gateway returned no image.', 'IMAGE_EMPTY')
-      const folder = runtime.outputFolder(exec, 'images')
-      const stem = runtime.stem(args.filename, args.prompt)
+      const result = await generateImages(runtime, exec, {
+        prompt: args.prompt,
+        ...args.model === undefined ? {} : { model: args.model },
+        ...args.size === undefined ? {} : { size: args.size },
+        ...args.quality === undefined ? {} : { quality: args.quality },
+        ...args.n === undefined ? {} : { n: args.n },
+        ...args.reference_images === undefined ? {} : { references: args.reference_images },
+      }, { folder: runtime.outputFolder(exec, 'images'), stem: runtime.stem(args.filename, args.prompt) })
       const attachments = runtime.options.attachments?.()
-      const saved = []
-      for (const [index, image] of images.entries()) {
-        const path = await saveNewFile(folder, images.length > 1 ? `${stem}-${index + 1}` : stem, extensionFor(image.mime, 'png'), image.data)
+      const images = []
+      for (const image of result.images) {
         let attachment: ImageAttachmentRef | undefined
         try {
-          attachment = await attachments?.saveImage({ data: image.data, mediaType: image.mime as ImageMediaType, name: basename(path) })
+          attachment = await attachments?.saveImage({ data: image.data, mediaType: image.mediaType as ImageMediaType, name: basename(image.absolutePath) })
         } catch (error) {
-          runtime.log(`dsh-media: could not attach ${basename(path)} for display: ${error instanceof Error ? error.message : String(error)}`)
+          runtime.log(`dsh-media: could not attach ${basename(image.absolutePath)} for display: ${error instanceof Error ? error.message : String(error)}`)
         }
-        saved.push({
-          path: runtime.display(exec, path), absolutePath: path, mediaType: image.mime, bytes: image.data.byteLength,
+        images.push({
+          path: runtime.display(exec, image.absolutePath), absolutePath: image.absolutePath, mediaType: image.mediaType, bytes: image.bytes,
           ...attachment === undefined ? {} : { attachment: JSON.parse(JSON.stringify(attachment)) as Record<string, string | number> },
         })
       }
       return {
-        model: model.id, images: saved,
-        ...estimate === undefined ? {} : { estimatedCny: estimate.amountCny.toFixed(2) },
-        ...revisedPrompt === undefined ? {} : { revisedPrompt },
+        model: result.model, images,
+        ...result.estimatedCny === undefined ? {} : { estimatedCny: result.estimatedCny },
+        ...result.revisedPrompt === undefined ? {} : { revisedPrompt: result.revisedPrompt },
       }
     },
   })
