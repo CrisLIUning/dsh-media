@@ -53,6 +53,8 @@
 
 ## 设置
 
+在侧边栏的“插件”页打开“VibeDev 媒体生成”，就能在插件详情里修改下面这些设置，改完点“保存”。
+
 | 设置 | 默认值 | 说明 |
 | --- | --- | --- |
 | 每次付费生成前先询问 | 关 | 打开后，每次生成前先确认费用。 |
@@ -84,6 +86,8 @@ Generate images, videos, music and podcasts, and transcribe speech, in DeepSeek 
 **Inputs**: reference images, videos and audio, and first and last frames, can each be a workspace path, an http(s) link, or `chat:1` for the most recent matching file you attached in the conversation. Each video model supports different modes, reference counts, durations, aspect ratios and resolutions. A request the model cannot serve is refused before anything is uploaded or charged, and the error says what the model supports.
 
 **Cost**: images are priced per image, video per second (reference video length counts), and music and podcasts per request. Failed video and audio tasks are not charged, and a submitted video cannot be cancelled. The "ask before each paid generation" setting is off by default; when it is on, every paid request first shows its estimated price for confirmation.
+
+**Settings**: open "VibeDev Media" on the sidebar's Plugins page to change the spending confirmation, the output folder and the default models, then save.
 
 **Privacy**: prompts and reference media are sent to the VibeDev gateway, which forwards them to the model provider. The plugin's own sign-in is kept in the DeepSeek Harness credential store, and task records are kept under `dsh-media/` in the DeepSeek Harness data folder.
 

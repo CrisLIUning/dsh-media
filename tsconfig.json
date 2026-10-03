@@ -3,8 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2023"],
-    "types": ["node"],
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
@@ -15,5 +19,11 @@
     "sourceMap": true,
     "noEmit": true
   },
-  "include": ["src", "tests"]
+  "include": [
+    "src",
+    "tests"
+  ],
+  "exclude": [
+    "src/client"
+  ]
 }

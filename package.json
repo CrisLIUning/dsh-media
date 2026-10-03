@@ -1,20 +1,26 @@
 {
   "name": "dsh-media",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "VibeDev 媒体生成：在 DeepSeek Harness 和 VibeDev 里用 VibeDev 网关生成图片、视频、音乐和播客，并转写语音 · Image, video, music and podcast generation plus speech transcription for DeepSeek Harness through the VibeDev gateway",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "icon": "./icon.svg",
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
+    "./client": "./client/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib",
+    "client",
+    "locale",
+    "icon.svg",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -22,6 +28,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ]
     }
   },
   "keywords": [
@@ -47,22 +61,25 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json && npm run build:client",
+    "build:client": "tsdown && node scripts/normalize-client.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json",
     "test": "vitest run",
     "prepack": "npm run build"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/schemastery": "^3.18.2",
     "@deepseek-ai/dsh-credentials": ">=0.2.0-rc.2 <0.3.0",
     "@deepseek-ai/dsh-llm": ">=0.2.0-rc.2 <0.3.0",
-    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0"
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0",
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.4",
     "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
     "@deepseek-ai/dsh-attachment": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-store": "^0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "^0.2.0-rc.2",
     "@deepseek-ai/dsh-credentials": "0.2.0-rc.2",
     "@deepseek-ai/dsh-deepseek-account": "0.2.0-rc.2",
     "@deepseek-ai/dsh-fs": "0.2.0-rc.2",
@@ -74,6 +91,11 @@
     "@deepseek-ai/dsh-user-approval": "0.2.0-rc.2",
     "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsdown": "^0.22.14",
     "typescript": "~5.9.3",
     "vitest": "^4.1.8"
   }
