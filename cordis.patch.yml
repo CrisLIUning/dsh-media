@@ -1,0 +1,4 @@
+# 把媒体生成插件插入 profile。
+- insert:
+    - id: dsh-media
+      name: dsh-media
