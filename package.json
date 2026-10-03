@@ -1,6 +1,6 @@
 {
   "name": "dsh-media",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "VibeDev 媒体生成：在 DeepSeek Harness 和 VibeDev 里用 VibeDev 网关生成图片、视频、音乐和播客，并转写语音 · Image, video, music and podcast generation plus speech transcription for DeepSeek Harness through the VibeDev gateway",
   "type": "module",
   "main": "lib/index.js",

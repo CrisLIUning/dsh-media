@@ -10,7 +10,7 @@ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import * as Media from '../src/index.js'
-import { CATALOG, MP4, PNG } from './fixtures.js'
+import { CATALOG, MP4, PNG, WAV } from './fixtures.js'
 import { json } from './helpers.js'
 
 const GATEWAY = 'https://gw.test'
@@ -132,6 +132,19 @@ describe('dsh-media plugin', () => {
     expect(result.isError).toBe(true)
     expect(result.error?.info).toEqual({ name: 'MediaError', code: 'INSUFFICIENT_BALANCE' })
     expect(textOf(result)).toContain('top up their VibeDev balance at https://vibedev.test/purchase')
+    await ctx.fiber.dispose()
+  })
+
+  it('waits for a free transcription slot instead of failing at once', async () => {
+    let busy = 3
+    routes[`POST ${GATEWAY}/v1/audio/transcriptions`] = () => busy-- > 0
+      ? json(503, { error: { code: 'AUDIO_CAPACITY_BUSY', message: 'two jobs running' } }, { 'retry-after': '0' })
+      : json(200, { text: '你好，世界' })
+    const { ctx, run } = await load()
+    const result = await run('audio_transcribe', { file: `data:audio/wav;base64,${Buffer.from(WAV).toString('base64')}` })
+    expect(result.isError).toBe(false)
+    expect(result.value).toMatchObject({ model: 'doubao-asr-vibedev', text: '你好，世界' })
+    expect(seen.filter(item => item.url.endsWith('/v1/audio/transcriptions'))).toHaveLength(4)
     await ctx.fiber.dispose()
   })
 

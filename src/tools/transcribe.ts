@@ -17,6 +17,8 @@ const MAX_SECONDS = 10 * 60
 const INLINE_CHARS = 20_000
 const POLL_MS = 3_000
 const POLL_LIMIT_MS = 15 * 60_000
+/** Busy answers waited out before a transcription is reported busy (each wait is the gateway's Retry-After). */
+const BUSY_RETRIES = 30
 const ACCEPTED = ['audio/wav', 'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/flac', 'audio/aac', 'video/mp4', 'video/webm']
 
 type Json = Record<string, unknown>
@@ -111,7 +113,12 @@ export function audioTranscribeTool(runtime: MediaRuntime): ToolDefinition {
       body.append('model', model.id)
       body.append('language', language)
       body.append('response_format', 'json')
-      const response = await runtime.http.send('/v1/audio/transcriptions', { method: 'POST', body, timeoutMs: 10 * 60_000, signal: exec.signal })
+      // The transcription lane runs about two jobs at a time and answers 503 with a
+      // short Retry-After beyond that; a long recording holds its slot for about
+      // its own length, so wait out more busy answers than other requests do.
+      const response = await runtime.http.send('/v1/audio/transcriptions', {
+        method: 'POST', body, timeoutMs: 10 * 60_000, signal: exec.signal, busyRetries: BUSY_RETRIES, maxBusyWaitMs: 30_000,
+      })
       let answer = record(await response.json().catch(() => undefined))
       const started = runtime.now()
       while (text(answer?.text) === undefined) {
