@@ -65,6 +65,10 @@
 
 提示词和参考素材会发送到 VibeDev 网关，再由网关转交给对应的模型服务商。生成结果保存在你的工作区。插件自己的登录凭据保存在 DeepSeek Harness 的凭据存储里；任务记录保存在 DeepSeek Harness 数据目录下的 `dsh-media/` 中。
 
+## 给其他插件用
+
+插件注册了一个 `vibedevMedia` 服务，其他插件可以用它生成图片和视频，走的是同一套模型选择、参考素材检查、幂等提交和后台保存。影视工作台（[dsh-film](https://github.com/CrisLIUning/dsh-film)）的分镜画布就是通过它生成的。调用方已经向用户显示过价格，所以不会再触发“每次付费生成前先询问”。
+
 ## 开发
 
 ```bash
@@ -90,6 +94,8 @@ Generate images, videos, music and podcasts, and transcribe speech, in DeepSeek 
 **Settings**: open "VibeDev Media" on the sidebar's Plugins page to change the spending confirmation, the output folder and the default models, then save.
 
 **Privacy**: prompts and reference media are sent to the VibeDev gateway, which forwards them to the model provider. The plugin's own sign-in is kept in the DeepSeek Harness credential store, and task records are kept under `dsh-media/` in the DeepSeek Harness data folder.
+
+**For other plugins**: the plugin registers a `vibedevMedia` service that generates images and videos through the same model choice, reference checks, idempotent submission and background saving. The film workbench ([dsh-film](https://github.com/CrisLIUning/dsh-film)) storyboard generates through it; the caller has already shown the price, so the spending confirmation does not ask again.
 
 ## License
 
