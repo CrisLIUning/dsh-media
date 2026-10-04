@@ -6,6 +6,8 @@
  * follower that saves the result — with the caller naming the workspace and
  * where results go. The caller has already shown the price and the user chose
  * to go ahead, so the spending confirmation setting does not ask again.
+ * Transcription (the workbench's gateway caption engine) may instead name the
+ * agent tool call it runs for, so the setting asks as it does for the tools.
  * @module dsh-media/service
  */
 
@@ -15,6 +17,8 @@ import type { MediaCall, MediaRuntime } from './runtime.js'
 import type { TaskRecord, TaskStatus } from './tasks/store.js'
 import { generateImages } from './tools/image.js'
 import type { ImageRequest } from './tools/image.js'
+import { transcribeAudio } from './tools/transcribe.js'
+import type { TranscribeRequest, TranscribeResult } from './tools/transcribe.js'
 import { prepareVideoTask } from './tools/video.js'
 import type { VideoRequest } from './tools/video.js'
 
@@ -26,6 +30,21 @@ export interface HostTarget {
   readonly folder: string
   /** File-name stem of the results. */
   readonly stem: string
+}
+
+/** How the cost of a host request is confirmed. */
+export interface HostSpending {
+  /**
+   * The caller showed the cost and the user chose to go ahead, so the
+   * spending confirmation setting does not ask. Defaults to true, as for the
+   * service's other paid calls; pass false with {@link agent} and
+   * {@link callId} to let the setting ask through the user's approval.
+   */
+  readonly confirmed?: boolean
+  /** The agent whose tool call this request serves, for the approval prompt. */
+  readonly agent?: MediaCall['agent']
+  /** That tool call's id. */
+  readonly callId?: MediaCall['callId']
 }
 
 /** A video or audio task, as host callers see it. */
@@ -107,6 +126,28 @@ export class MediaHostService {
       }
       throw error
     }
+  }
+
+  /**
+   * Transcribe one recording (Mandarin only for now; at most 20 MB and 10
+   * minutes, see `TRANSCRIBE_LIMITS`). The gateway is asked for a background
+   * task unless the request says otherwise, and the task is polled until the
+   * transcript is final. The result has the text; `segments` only when the
+   * gateway returns timings, which it does not do yet.
+   * @param request - the audio (a path relative to `target.cwd`, a link, or bytes) and options.
+   * @param target - the workspace.
+   * @param signal - stops waiting; a gateway task already accepted runs on and is charged.
+   * @param spending - whether the cost was already confirmed (default) or the setting may ask.
+   * @returns the transcript.
+   */
+  transcribe(request: TranscribeRequest, target: Pick<HostTarget, 'cwd'>, signal: AbortSignal,
+    spending: HostSpending = {}): Promise<TranscribeResult> {
+    const call: MediaCall = {
+      signal, cwd: target.cwd, confirmed: spending.confirmed ?? true,
+      ...spending.agent === undefined ? {} : { agent: spending.agent },
+      ...spending.callId === undefined ? {} : { callId: spending.callId },
+    }
+    return transcribeAudio(this.runtime, call, { ...request, background: request.background ?? true })
   }
 
   /**
