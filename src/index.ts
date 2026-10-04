@@ -46,7 +46,7 @@ import { stateDirectory } from './util/files.js'
 
 export { MediaError } from './gateway/errors.js'
 export { MediaHostService } from './service.js'
-export type { HostSpending, HostTarget, MediaTaskView } from './service.js'
+export type { HostSpending, HostTarget, MediaTaskView, SpendingRequest } from './service.js'
 export type { ImageRequest } from './tools/image.js'
 export { TRANSCRIBE_LIMITS } from './tools/transcribe.js'
 export type { TranscribeRequest, TranscribeResult, TranscribeSegment } from './tools/transcribe.js'

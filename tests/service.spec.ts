@@ -5,8 +5,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import type { ApprovalOutcome, ApprovalRequest, ApprovalService } from '@deepseek-ai/dsh-user-approval'
 import * as Media from '../src/index.js'
 import type { MediaHostService, MediaTaskView } from '../src/index.js'
 import { parseSegments } from '../src/tools/transcribe.js'
@@ -51,12 +54,15 @@ afterEach(async () => {
   await rm(workspace, { recursive: true, force: true })
 })
 
-async function load() {
+async function load(options: { confirmSpending?: boolean; approval?: Pick<ApprovalService, 'request'> } = {}) {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  if (options.approval !== undefined) ctx.provide('approval', options.approval as ApprovalService)
   // Asking before spending is on: the service's callers confirm in their own interface.
-  await ctx.plugin(Media, { gatewayOrigin: `${GATEWAY}/`, apiKeyEnv: 'DSH_MEDIA_TEST_KEY', stateDir: state, confirmSpending: true })
+  await ctx.plugin(Media, {
+    gatewayOrigin: `${GATEWAY}/`, apiKeyEnv: 'DSH_MEDIA_TEST_KEY', stateDir: state, confirmSpending: options.confirmSpending ?? true,
+  })
   const service = ctx.get('vibedevMedia') as MediaHostService | undefined
   if (service === undefined) throw new Error('vibedevMedia is not provided')
   return { ctx, service }
@@ -242,6 +248,105 @@ describe('vibedevMedia transcribe', () => {
     expect(posts()).toHaveLength(0)
     routes[TRANSCRIBE] = () => json(402, { error: { code: 'INSUFFICIENT_BALANCE', message: 'low' } })
     await expect(service.transcribe({ data: wav(2) }, { cwd: workspace }, signal)).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' })
+    await ctx.fiber.dispose()
+  })
+})
+
+describe('vibedevMedia confirmSpending', () => {
+  const agent = { id: 'agent-1' } as unknown as Agent
+  const callId = ToolCallId('call-caption-1')
+
+  /** An approval service that answers each question with the next outcome and records the questions. */
+  function approval(...outcomes: ApprovalOutcome[]) {
+    const asked: ApprovalRequest[] = []
+    const request = vi.fn(async (request: ApprovalRequest) => {
+      asked.push(request)
+      const outcome = outcomes.shift()
+      if (outcome === undefined) throw new Error('unexpected approval question')
+      return outcome
+    })
+    return { asked, request }
+  }
+
+  it('does not ask when the setting is off, even for an unconfirmed agent call', async () => {
+    const answerer = approval()
+    const { ctx, service } = await load({ confirmSpending: false, approval: answerer })
+    await expect(service.confirmSpending({ seconds: 95, amountCny: 0.08 }, { confirmed: false, agent, callId })).resolves.toBeUndefined()
+    await expect(service.confirmSpending({ seconds: 95 })).resolves.toBeUndefined()
+    expect(answerer.request).not.toHaveBeenCalled()
+    expect(seen).toHaveLength(0)
+    await ctx.fiber.dispose()
+  })
+
+  it('does not ask when the caller already confirmed', async () => {
+    const answerer = approval()
+    const { ctx, service } = await load({ approval: answerer })
+    await expect(service.confirmSpending({ seconds: 95, amountCny: 0.08 }, { confirmed: true, agent, callId })).resolves.toBeUndefined()
+    expect(answerer.request).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+  })
+
+  it('asks through the agent\'s tool call with the length and price, and resolves when allowed once', async () => {
+    const answerer = approval('allowed-once', 'allowed-once', 'allowed-once')
+    const { ctx, service } = await load({ approval: answerer })
+    const signal = new AbortController().signal
+    await expect(service.confirmSpending({ seconds: 45.04, amountCny: 0.0792 }, { confirmed: false, agent, callId }, signal)).resolves.toBeUndefined()
+    expect(answerer.asked).toHaveLength(1)
+    expect(answerer.asked[0]).toMatchObject({
+      agent, callId, signal, toolName: 'audio_transcribe',
+      reason: 'Transcribe 45 s of audio, about ¥0.08.',
+      displayReason: { en: 'Transcribe 45 s of audio, about ¥0.08.', zh: '转写 45 秒音频，约 ¥0.08。', 'zh-CN': '转写 45 秒音频，约 ¥0.08。' },
+    })
+    // Without a price the prompt says how it is billed; from a minute on it also gives minutes.
+    await service.confirmSpending({ seconds: 125 }, { confirmed: false, agent, callId })
+    expect(answerer.asked[1]?.displayReason).toEqual({
+      en: 'Transcribe 125 s (2.1 min) of audio (billed per minute).',
+      zh: '转写 125 秒（2.1 分钟）音频（按分钟计费）。',
+      'zh-CN': '转写 125 秒（2.1 分钟）音频（按分钟计费）。',
+    })
+    // A missing `confirmed` is not a confirmation here: asking is what the call is for.
+    await service.confirmSpending({ seconds: 30, amountCny: 0.03 }, { agent, callId })
+    expect(answerer.asked[2]?.displayReason?.en).toBe('Transcribe 30 s of audio, about ¥0.03.')
+    expect(seen).toHaveLength(0)
+    await ctx.fiber.dispose()
+  })
+
+  it('reports a declined, unanswered or withdrawn question as runtime.confirmSpending does', async () => {
+    const answerer = approval('rejected', 'unavailable', 'cancelled')
+    const { ctx, service } = await load({ approval: answerer })
+    const unconfirmed = { confirmed: false, agent, callId }
+    await expect(service.confirmSpending({ seconds: 60, amountCny: 0.05 }, unconfirmed))
+      .rejects.toMatchObject({ name: 'MediaError', code: 'SPENDING_DECLINED', message: expect.stringContaining('declined') })
+    await expect(service.confirmSpending({ seconds: 60, amountCny: 0.05 }, unconfirmed))
+      .rejects.toMatchObject({ code: 'SPENDING_DECLINED', message: expect.stringContaining('Nobody could confirm') })
+    await expect(service.confirmSpending({ seconds: 60, amountCny: 0.05 }, unconfirmed)).rejects.toMatchObject({ code: 'ABORTED' })
+    expect(answerer.asked).toHaveLength(3)
+    await ctx.fiber.dispose()
+  })
+
+  it('cannot ask without the agent and its tool call, or without an approval service', async () => {
+    const answerer = approval()
+    const { ctx, service } = await load({ approval: answerer })
+    await expect(service.confirmSpending({ seconds: 60 }, { confirmed: false })).rejects.toMatchObject({ code: 'SPENDING_CONFIRMATION_UNAVAILABLE' })
+    await expect(service.confirmSpending({ seconds: 60 }, { confirmed: false, agent })).rejects.toMatchObject({ code: 'SPENDING_CONFIRMATION_UNAVAILABLE' })
+    await expect(service.confirmSpending({ seconds: 60 }, { confirmed: false, callId })).rejects.toMatchObject({ code: 'SPENDING_CONFIRMATION_UNAVAILABLE' })
+    await expect(service.confirmSpending({ seconds: 60 })).rejects.toMatchObject({ code: 'SPENDING_CONFIRMATION_UNAVAILABLE' })
+    expect(answerer.request).not.toHaveBeenCalled()
+    await ctx.fiber.dispose()
+    const bare = await load()
+    await expect(bare.service.confirmSpending({ seconds: 60 }, { confirmed: false, agent, callId })).rejects.toMatchObject({ code: 'SPENDING_CONFIRMATION_UNAVAILABLE' })
+    await bare.ctx.fiber.dispose()
+  })
+
+  it('refuses a length or price that is not a number of seconds or yuan', async () => {
+    const answerer = approval()
+    const { ctx, service } = await load({ approval: answerer })
+    const unconfirmed = { confirmed: false, agent, callId }
+    await expect(service.confirmSpending({ seconds: Number.NaN }, unconfirmed)).rejects.toMatchObject({ code: 'AUDIO_INPUT_INVALID', details: { field: 'seconds' } })
+    await expect(service.confirmSpending({ seconds: -1 }, unconfirmed)).rejects.toMatchObject({ code: 'AUDIO_INPUT_INVALID', details: { field: 'seconds' } })
+    await expect(service.confirmSpending({ seconds: 60, amountCny: Number.POSITIVE_INFINITY }, unconfirmed))
+      .rejects.toMatchObject({ code: 'AUDIO_INPUT_INVALID', details: { field: 'amountCny' } })
+    expect(answerer.request).not.toHaveBeenCalled()
     await ctx.fiber.dispose()
   })
 })
