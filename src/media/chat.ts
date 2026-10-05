@@ -3,7 +3,7 @@
  * most recent attachment of the kind the input needs) or `chat:<kind>:N`
  * (`chat:image:1`, `chat:video:2`, `chat:audio:1`). The model sees attached
  * images but no path to them; this is how it can pass one on as a reference.
- * @module dsh-media/media/chat
+ * @module dsh-vibedev/media/chat
  */
 
 import type { AttachmentStore, FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'

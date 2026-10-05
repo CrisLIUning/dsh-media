@@ -3,7 +3,7 @@
  * briefly), model choice, the workspace output folders, input loading
  * (workspace paths, links, data URLs and `chat:` attachments) and the optional
  * spending confirmation.
- * @module dsh-media/runtime
+ * @module dsh-vibedev/runtime
  */
 
 import { readFile, stat } from 'node:fs/promises'
@@ -297,7 +297,7 @@ export class MediaRuntime {
     const agent = call.agent
     const callId = call.callId
     if (approval === undefined || agent === undefined || callId === undefined) {
-      throw new MediaError('Spending confirmation is turned on in the dsh-media settings, but this host cannot ask the user. '
+      throw new MediaError('Spending confirmation is turned on in the dsh-vibedev settings, but this host cannot ask the user. '
         + 'Nothing was submitted; the user can turn the setting off to generate without asking.', 'SPENDING_CONFIRMATION_UNAVAILABLE')
     }
     const outcome = await approval.request({

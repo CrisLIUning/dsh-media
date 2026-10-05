@@ -12,7 +12,7 @@
  * original task when there is one. A resend that is refused outright is
  * retried only briefly, so a refused request is not created later behind the
  * user's back.
- * @module dsh-media/tasks/tracker
+ * @module dsh-vibedev/tasks/tracker
  */
 
 import { randomUUID } from 'node:crypto'
@@ -191,7 +191,7 @@ export class TaskTracker {
   }
 
   private log(message: string): void {
-    this.options.log?.(`dsh-media: ${message}`)
+    this.options.log?.(`dsh-vibedev: ${message}`)
   }
 
   /**
@@ -230,7 +230,7 @@ export class TaskTracker {
         if (signal?.aborted === true) {
           await this.finish(draft.id, {
             status: 'lost',
-            error: { code: 'SUBMISSION_CANCELLED', message: 'The request was cancelled while it was being submitted. If the gateway had already created the task, it runs and is charged, but dsh-media cannot follow it.' },
+            error: { code: 'SUBMISSION_CANCELLED', message: 'The request was cancelled while it was being submitted. If the gateway had already created the task, it runs and is charged, but dsh-vibedev cannot follow it.' },
           }).catch(() => undefined)
           await this.releaseClaim(draft.id)
           throw error
@@ -272,7 +272,7 @@ export class TaskTracker {
     }
     this.followQuietly(draft.id)
     throw new MediaError(`The VibeDev gateway did not confirm the request (${messageOf(lastError)}). `
-      + 'dsh-media keeps resending it for a few minutes under the same request key, so it cannot be created twice, and saves the result if it runs. '
+      + 'dsh-vibedev keeps resending it for a few minutes under the same request key, so it cannot be created twice, and saves the result if it runs. '
       + `Check media_tasks for task ${draft.id}; do not submit the same request again.`, 'SUBMISSION_UNCONFIRMED', { retryable: false })
   }
 
@@ -337,7 +337,7 @@ export class TaskTracker {
 
   private async update(id: string, patch: Partial<Omit<TaskRecord, 'id' | 'kind' | 'createdAt'>>): Promise<TaskRecord> {
     const next = await this.options.store.update(id, patch)
-    if (next === undefined) throw new MediaError(`dsh-media has no task ${id}.`, 'UNKNOWN_TASK')
+    if (next === undefined) throw new MediaError(`dsh-vibedev has no task ${id}.`, 'UNKNOWN_TASK')
     this.notify(next)
     return next
   }
@@ -375,7 +375,7 @@ export class TaskTracker {
 
   private async loop(id: string): Promise<TaskRecord> {
     let record = await this.options.store.get(id)
-    if (record === undefined) throw new MediaError(`dsh-media has no task ${id}.`, 'UNKNOWN_TASK')
+    if (record === undefined) throw new MediaError(`dsh-vibedev has no task ${id}.`, 'UNKNOWN_TASK')
     const spec = SPECS[record.kind]
     const maxAge = this.options.maxAgeMs ?? 3 * 3_600_000
     let failures = 0
@@ -391,12 +391,12 @@ export class TaskTracker {
           }
           const age = this.now() - record.createdAt
           if (age > maxAge) {
-            return await this.finish(id, { status: 'lost', error: { code: 'TASK_TIMED_OUT', message: `No result after ${Math.round(maxAge / 3_600_000)} hours; dsh-media stopped following it.` } })
+            return await this.finish(id, { status: 'lost', error: { code: 'TASK_TIMED_OUT', message: `No result after ${Math.round(maxAge / 3_600_000)} hours; dsh-vibedev stopped following it.` } })
           }
           let task: RemoteTask | undefined
           if (record.status === 'submitting' || record.gatewayId === undefined) {
             if (age > (this.options.resendWindowMs ?? 5 * 60_000)) {
-              return await this.finish(id, { status: 'lost', error: { code: 'SUBMISSION_UNCONFIRMED', message: 'The gateway never confirmed this request. If it did run, it is not visible to dsh-media.' } })
+              return await this.finish(id, { status: 'lost', error: { code: 'SUBMISSION_UNCONFIRMED', message: 'The gateway never confirmed this request. If it did run, it is not visible to dsh-vibedev.' } })
             }
             task = spec.parse(await this.options.http.json(spec.endpoint, {
               method: 'POST', json: record.body, idempotencyKey: record.id, timeoutMs: SUBMIT_TIMEOUT_MS, signal: this.signal,

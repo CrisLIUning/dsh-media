@@ -4,7 +4,7 @@
  * per-second video prices times billed seconds, where billed seconds are the
  * output length plus the summed reference video length, rounded up once.
  * Estimates are for the user's information; the gateway's receipt is the charge.
- * @module dsh-media/pricing
+ * @module dsh-vibedev/pricing
  */
 
 import type { MediaModel, MediaPriceTier, MediaPricing } from './gateway/catalog.js'

@@ -3,7 +3,7 @@
  * declares, upload every reference to the gateway media library, check the
  * measured reference lengths, submit once under an idempotency key and report
  * the result through a background job.
- * @module dsh-media/tools/video
+ * @module dsh-vibedev/tools/video
  */
 
 import { randomUUID } from 'node:crypto'

@@ -1,7 +1,7 @@
 /**
  * `audio_generate`: a song or a podcast episode, as a background task whose
  * results are saved in the workspace.
- * @module dsh-media/tools/audio
+ * @module dsh-vibedev/tools/audio
  */
 
 import { randomUUID } from 'node:crypto'

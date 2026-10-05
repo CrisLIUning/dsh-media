@@ -3,7 +3,7 @@
  * signed-in VibeDev account (the VibeDev app's account service hands out its
  * token for the gateway origin), the plugin's own sign-in, then a development
  * key named by an environment variable.
- * @module dsh-media/auth/credentials
+ * @module dsh-vibedev/auth/credentials
  */
 
 import { randomUUID } from 'node:crypto'
@@ -58,6 +58,7 @@ export class CredentialChain {
   }
 }
 
+// Named after the plugin's former name, dsh-media: keeping the key lets an upgrade keep the sign-in.
 const GRANT_KEY = credentialKey('dsh-media', 'vibedev-session')
 
 function isGrant(value: unknown): value is PluginGrant {

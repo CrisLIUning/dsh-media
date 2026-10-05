@@ -1,7 +1,7 @@
 /**
- * `media_tasks`: the video and audio tasks dsh-media is following or has
+ * `media_tasks`: the video and audio tasks dsh-vibedev is following or has
  * finished, newest first.
- * @module dsh-media/tools/tasks
+ * @module dsh-vibedev/tools/tasks
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -19,7 +19,7 @@ import { describeTask } from './common.js'
 export function mediaTasksTool(runtime: MediaRuntime): ToolDefinition {
   return defineTool({
     name: 'media_tasks',
-    description: 'Show the video and audio generation tasks dsh-media is following or has finished (newest first): status, progress, '
+    description: 'Show the video and audio generation tasks dsh-vibedev is following or has finished (newest first): status, progress, '
       + 'saved files and charges. Background jobs already report completion, so use this only when asked, after a restart, '
       + 'or to look up an earlier result.',
     parameters: {

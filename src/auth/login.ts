@@ -10,7 +10,7 @@
  * - `POST /api/v1/vibedev/link/redeem {code, code_verifier, token_type:'app', client, device_id, device_model, os_version}`
  * - `POST /api/v1/vibedev/app-token/refresh {refresh_token, device_id}`: a new pair every time; the old refresh token dies
  * - `POST /api/v1/vibedev/app-token/revoke` (bearer or `{refresh_token}`): always 204
- * @module dsh-media/auth/login
+ * @module dsh-vibedev/auth/login
  */
 
 import { createHash, randomBytes } from 'node:crypto'
@@ -254,7 +254,7 @@ export class PluginLogin {
           const response = await this.post('/api/v1/vibedev/app-token/refresh', { refresh_token: stored.refreshToken, device_id: deviceId })
           const body = await response.json().catch(() => undefined)
           if (response.status === 401 || response.status === 403) {
-            this.options.log?.(`dsh-media: the VibeDev session ended (${text(record(body)?.reason) ?? response.status}); signed out`)
+            this.options.log?.(`dsh-vibedev: the VibeDev session ended (${text(record(body)?.reason) ?? response.status}); signed out`)
             outcome = undefined
             return { kind: 'delete' }
           }
@@ -293,11 +293,13 @@ export class PluginLogin {
    * Start a sign-in: listen on a loopback port, open the authorization page in
    * the system browser, and finish in the background when the browser returns.
    * Starting again while one is waiting returns the waiting one.
+   * @param request - `open: false` leaves opening the link to the caller (a page that opens it itself).
    * @returns the authorization link, whether a browser was opened, and the completion.
    */
-  async startSignIn(): Promise<PendingSignIn & { opened: boolean }> {
+  async startSignIn(request: { open?: boolean } = {}): Promise<PendingSignIn & { opened: boolean }> {
+    const open = (url: string): Promise<boolean> => request.open === false ? Promise.resolve(false) : (this.options.openBrowser ?? openInBrowser)(url)
     if (this.pending !== undefined && this.pending.expiresAt > this.now()) {
-      const opened = await (this.options.openBrowser ?? openInBrowser)(this.pending.url)
+      const opened = await open(this.pending.url)
       return { url: this.pending.url, expiresAt: this.pending.expiresAt, done: this.pending.done, opened }
     }
     const verifier = base64url(randomBytes(32))
@@ -360,7 +362,7 @@ export class PluginLogin {
       url, expiresAt: this.now() + timeoutMs, done, server,
       cancel: (reason) => { if (!settled) { settled = true; finish(); rejectDone(reason) } },
     }
-    const opened = await (this.options.openBrowser ?? openInBrowser)(url)
+    const opened = await open(url)
     return { url, expiresAt: this.now() + timeoutMs, done, opened }
   }
 

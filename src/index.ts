@@ -1,33 +1,44 @@
 /**
- * dsh-media: image, video, music, podcast and speech-to-text generation for
- * DeepSeek Harness through the VibeDev gateway.
+ * dsh-vibedev (formerly dsh-media): the VibeDev account and the VibeDev
+ * gateway for DeepSeek Harness — its chat models in the model pickers on their
+ * own route (`vibedev-gateway`), next to the DeepSeek account's, and image,
+ * video, music, podcast and speech-to-text tools for the agent.
  *
- * The agent calls the tools on its own judgment; results are saved in the
- * workspace under `media/`. Requests are paid from the user's VibeDev balance:
- * inside the VibeDev app the app's signed-in account is used; elsewhere the
- * plugin signs in to VibeDev itself (`media_account`).
+ * Everything is paid from the user's VibeDev balance: inside the VibeDev app
+ * the app's signed-in account is used; elsewhere the plugin signs in to
+ * VibeDev itself (the sidebar's "登录 VibeDev", Settings → VibeDev 账号, or the
+ * `media_account` tool). The DeepSeek account stays the Harness's own.
+ *
+ * Kept from dsh-media so an upgrade carries over: the sign-in record
+ * (`dsh-media/vibedev-session`), the data folder (`<harness home>/dsh-media`),
+ * the `vibedevMedia` host service and the media tool names.
  *
  * ```yaml
  * - insert:
- *     - id: dsh-media
- *       name: dsh-media
+ *     - id: dsh-vibedev
+ *       name: '@vibedev-si/dsh-vibedev'
  * ```
- * @module dsh-media
+ * @module dsh-vibedev
  */
 
 import { readFileSync } from 'node:fs'
 import type { Context, Volatile } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-attachment'
+import type {} from '@deepseek-ai/dsh-client-connection'
 import type {} from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-deepseek-account'
 import type {} from '@deepseek-ai/dsh-fs'
 import type {} from '@deepseek-ai/dsh-jobs'
+import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import Schema from '@deepseek-ai/schemastery'
+import { AccountService, accountRoutes } from './account/index.js'
 import { CredentialChain, grantStorage } from './auth/credentials.js'
-import { PluginLogin } from './auth/login.js'
+import { PluginLogin, openInBrowser } from './auth/login.js'
+import { installGatewayModels } from './llm/index.js'
+import type { GatewayModels } from './llm/index.js'
 import { MediaLibrary } from './gateway/assets.js'
 import { GatewayHttp } from './gateway/http.js'
 import { MediaRuntime } from './runtime.js'
@@ -51,14 +62,25 @@ export type { ImageRequest } from './tools/image.js'
 export type { VideoRequest } from './tools/video.js'
 export { parseMediaCatalog } from './gateway/catalog.js'
 export type { MediaModel, VideoCapabilities, VideoMode } from './gateway/catalog.js'
+export { ACCOUNT_ROUTE_PREFIX, AccountService } from './account/index.js'
+export type { AccountSource, AccountView } from './account/index.js'
+export { INSUFFICIENT_BALANCE_CODE, SIGN_IN_REQUIRED_CODE, VIBEDEV_ROUTE } from './llm/index.js'
 
 /** The package version, sent in the `User-Agent` the gateway attributes plugin traffic by. */
 export const version: string = (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version
 
-export const name = 'dsh-media'
+export const name = 'dsh-vibedev'
 export const inject = ['tools']
 
 export interface Config {
+  /** Name the model pickers and the Models page show for the VibeDev models. */
+  displayName: string
+  /** VibeDev chat models listed first, in this order, when the catalog offers them. */
+  preferredModels: string[]
+  /** Open the system browser when a sign-in starts (off: the page opens the link itself). */
+  openBrowserOnSignIn: boolean
+  /** Minutes between catalog reads while the app runs. */
+  catalogRefreshMinutes: number
   /** Ask the user before each paid request. */
   confirmSpending: Volatile<boolean>
   /** Output folder, relative to the workspace (or absolute). */
@@ -78,6 +100,10 @@ export interface Config {
 }
 
 export const Config = Schema.object({
+  displayName: Schema.string().default('VibeDev'),
+  preferredModels: Schema.array(Schema.string()).default([]),
+  openBrowserOnSignIn: Schema.boolean().default(true),
+  catalogRefreshMinutes: Schema.number().min(1).max(1440).default(30),
   confirmSpending: Schema.boolean().default(false).volatile(),
   outputDir: Schema.string().default('media').volatile(),
   imageModel: Schema.string().default('').volatile(),
@@ -90,6 +116,10 @@ export const Config = Schema.object({
   stateDir: Schema.string().default(''),
 }).i18n({
   'zh-CN': {
+    displayName: '模型选择器里显示的名称',
+    preferredModels: '排在最前的 VibeDev 模型（按顺序，留空按网关顺序）',
+    openBrowserOnSignIn: '登录时自动打开系统浏览器',
+    catalogRefreshMinutes: '模型目录刷新间隔（分钟）',
     confirmSpending: '每次付费生成前先询问（默认关闭）',
     outputDir: '保存目录（相对于工作区）',
     imageModel: '默认生图模型（留空由 Agent 按目录选择）',
@@ -102,6 +132,10 @@ export const Config = Schema.object({
     stateDir: '插件数据目录（留空为默认）',
   },
   'en-US': {
+    displayName: 'Name the model pickers show',
+    preferredModels: 'VibeDev models listed first, in this order (empty: the gateway\'s order)',
+    openBrowserOnSignIn: 'Open the system browser when signing in',
+    catalogRefreshMinutes: 'Model catalog refresh interval (minutes)',
     confirmSpending: 'Ask before each paid generation (off by default)',
     outputDir: 'Output folder (relative to the workspace)',
     imageModel: 'Default image model (empty: the agent chooses from the catalog)',
@@ -128,9 +162,10 @@ export function apply(ctx: Context, config: Config): void {
   const userAgent = `vibedev-plugin/${version}`
   const warn = (message: string): void => { ctx.logger.warn(message) }
 
+  const storage = grantStorage(stateDir, () => ctx.get('credentials'))
   const login = new PluginLogin({
-    origin, userAgent, log: warn,
-    storage: grantStorage(stateDir, () => ctx.get('credentials')),
+    origin, userAgent, log: warn, storage,
+    openBrowser: url => config.openBrowserOnSignIn ? openInBrowser(url) : Promise.resolve(false),
   })
   const chain = new CredentialChain({
     origin, plugin: login,
@@ -169,22 +204,49 @@ export function apply(ctx: Context, config: Config): void {
   ]) ctx.tools.register(tool)
 
   // Other plugins (the film workbench) generate through the same runtime.
-  ctx.effect(() => ctx.provide('vibedevMedia', new MediaHostService(runtime, version)), 'dsh-media: host service')
+  ctx.effect(() => ctx.provide('vibedevMedia', new MediaHostService(runtime, version)), 'dsh-vibedev: media host service')
 
   const prompt = ctx.get('systemPrompt')
   if (prompt !== undefined) {
-    prompt.section({ name: 'tool:dsh-media', order: prompt.getSectionOrder('TOOL_COMPUTER_USE') + 50, text: GUIDANCE, interpolate: false })
+    prompt.section({ name: 'tool:dsh-vibedev', order: prompt.getSectionOrder('TOOL_COMPUTER_USE') + 50, text: GUIDANCE, interpolate: false })
   }
 
+  // The VibeDev chat models in the model pickers, next to the DeepSeek account's.
+  let route: GatewayModels | undefined
+  ctx.inject(['llm'], (llmCtx) => {
+    route = installGatewayModels(llmCtx, {
+      origin,
+      displayName: config.displayName,
+      resolveCredential: () => chain.resolve(),
+      rejectCredential: credential => chain.reject(credential),
+      deviceId: () => storage.deviceId(),
+      preferredModels: () => config.preferredModels,
+      onCredentialChange: listener => login.onChange(listener),
+      catalogRefreshMinutes: config.catalogRefreshMinutes,
+    })
+    llmCtx.effect(() => () => { route = undefined }, 'dsh-vibedev: route state')
+  })
+
+  // The account pages' routes (sidebar status, Settings → VibeDev 账号).
+  const account = new AccountService({
+    origin, userAgent, chain, login,
+    models: () => ({ count: route?.models().length ?? 0, ...route?.hidden() === undefined ? {} : { hidden: route.hidden() } }),
+  })
+  ctx.inject(['connection'], (scoped) => {
+    for (const accountRoute of accountRoutes(account)) {
+      scoped.effect(() => scoped.connection.fetch.register(accountRoute), `dsh-vibedev: ${accountRoute.path}`)
+    }
+  })
+
   ctx.effect(() => {
-    void tracker.resume().catch((error: unknown) => { warn(`dsh-media: resuming tasks failed: ${String(error)}`) })
+    void tracker.resume().catch((error: unknown) => { warn(`dsh-vibedev: resuming tasks failed: ${String(error)}`) })
     const unsubscribe = login.onChange(() => { runtime.invalidateCatalog() })
     return () => {
       unsubscribe()
       tracker.dispose()
       login.dispose()
     }
-  }, 'dsh-media: tasks and sign-in')
+  }, 'dsh-vibedev: tasks and sign-in')
 
   // Which models the credential may call changes with a sign-in, sign-out or account switch.
   ctx.inject(['deepseekAccount'], (accountCtx) => {
@@ -198,6 +260,6 @@ export function apply(ctx: Context, config: Config): void {
         }
       })()
       return () => { controller.abort() }
-    }, 'dsh-media: account watch')
+    }, 'dsh-vibedev: media catalog account watch')
   })
 }

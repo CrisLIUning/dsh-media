@@ -6,7 +6,7 @@
  * follower that saves the result — with the caller naming the workspace and
  * where results go. The caller has already shown the price and the user chose
  * to go ahead, so the spending confirmation setting does not ask again.
- * @module dsh-media/service
+ * @module dsh-vibedev/service
  */
 
 import type { MediaModel } from './gateway/catalog.js'

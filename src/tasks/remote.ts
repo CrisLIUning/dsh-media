@@ -4,7 +4,7 @@
  * receipt and `asset`), and `POST /v1/audio/generations` and
  * `GET /v1/audio/generations/{id}` (`outputs[]`). Unknown statuses count as
  * still running; only an explicit terminal status ends a task.
- * @module dsh-media/tasks/remote
+ * @module dsh-vibedev/tasks/remote
  */
 
 /** One produced file as the gateway describes it. */

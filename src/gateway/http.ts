@@ -5,7 +5,7 @@
  *
  * The credential is attached only to requests on the gateway origin: upload
  * URLs and third-party links never see it.
- * @module dsh-media/gateway/http
+ * @module dsh-vibedev/gateway/http
  */
 
 import { MediaError, gatewayWords, parseGatewayFailure, retryAfterMs } from './errors.js'

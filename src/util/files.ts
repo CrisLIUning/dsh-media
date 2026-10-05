@@ -3,7 +3,7 @@
  * workspace, and atomic writes of generated media. Content is written to a
  * temporary file first and moved into place only when complete, so a crash
  * never leaves a half-written or empty file under a final name.
- * @module dsh-media/util/files
+ * @module dsh-vibedev/util/files
  */
 
 import { randomUUID } from 'node:crypto'
@@ -34,7 +34,8 @@ export function harnessHome(env: Readonly<Record<string, string | undefined>> = 
 }
 
 /**
- * The plugin's own state directory: the configured one, else `<harness home>/dsh-media`.
+ * The plugin's own state directory: the configured one, else `<harness home>/dsh-media`
+ * (the plugin's former name, kept so an upgrade keeps its tasks and device id).
  * @param configured - the `stateDir` setting; empty for the default.
  * @param env - the environment.
  * @returns the absolute directory.

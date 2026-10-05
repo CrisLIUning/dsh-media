@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
@@ -156,6 +156,51 @@ describe('dsh-media plugin', () => {
     const status = await run('media_account', { action: 'status' })
     expect(status.value).toMatchObject({ source: 'none' })
     expect(seen).toEqual([])
+    await ctx.fiber.dispose()
+  })
+})
+
+describe('dsh-vibedev: the VibeDev models and the account routes', () => {
+  async function loadWithHost() {
+    const registered: Array<{ path: string; fetch: (request: Request) => Promise<Response> }> = []
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    ctx.provide('connection', { fetch: { register: (route: { path: string; fetch: (request: Request) => Promise<Response> }) => { registered.push(route); return () => {} } } } as never)
+    await ctx.plugin(Media, { gatewayOrigin: `${GATEWAY}/`, apiKeyEnv: 'DSH_MEDIA_TEST_KEY', stateDir: dir })
+    return { ctx, registered }
+  }
+
+  it('lists the gateway chat models on the vibedev-gateway route', async () => {
+    const { ctx } = await loadWithHost()
+    await vi.waitFor(async () => {
+      expect((await ctx.llm.listModels(Media.VIBEDEV_ROUTE)).map(model => model.id)).toEqual(['deepseek-v4-flash'])
+    })
+    const catalogRead = seen.find(item => item.url === `${GATEWAY}/v1/models` && item.headers.authorization === 'Bearer dev-key')
+    expect(catalogRead).toBeDefined()
+    await ctx.fiber.dispose()
+  })
+
+  it('serves the account routes, reporting the credential and the listed models', async () => {
+    routes[`GET ${GATEWAY}/v1/account/auth/me`] = () => json(200, { code: 0, data: { id: 1, nickname: 'dev', balance: 3, currency: 'CNY' } })
+    const { ctx, registered } = await loadWithHost()
+    expect(registered.map(route => route.path).sort()).toEqual([
+      Media.ACCOUNT_ROUTE_PREFIX, `${Media.ACCOUNT_ROUTE_PREFIX}/cancel`, `${Media.ACCOUNT_ROUTE_PREFIX}/sign-in`, `${Media.ACCOUNT_ROUTE_PREFIX}/sign-out`,
+    ])
+    await vi.waitFor(async () => { expect(await ctx.llm.listModels(Media.VIBEDEV_ROUTE)).toHaveLength(1) })
+    const view = registered.find(route => route.path === Media.ACCOUNT_ROUTE_PREFIX)
+    const answer = await view?.fetch(new Request(`http://host${Media.ACCOUNT_ROUTE_PREFIX}`))
+    expect(await answer?.json()).toMatchObject({ source: 'key', user: { nickname: 'dev' }, balance: { amount: '3', currency: 'CNY' }, models: { count: 1 } })
+    await ctx.fiber.dispose()
+  })
+
+  it('lists no VibeDev models while nobody is signed in', async () => {
+    vi.stubEnv('DSH_MEDIA_TEST_KEY', '')
+    const { ctx } = await loadWithHost()
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(await ctx.llm.listModels(Media.VIBEDEV_ROUTE)).toEqual([])
+    expect(seen.filter(item => item.url === `${GATEWAY}/v1/models`)).toEqual([])
     await ctx.fiber.dispose()
   })
 })

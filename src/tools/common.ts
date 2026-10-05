@@ -2,7 +2,7 @@
  * Pieces the media tools share: how inputs are described to the model, the
  * background job that reports a video or audio task, and the wording of task
  * outcomes.
- * @module dsh-media/tools/common
+ * @module dsh-vibedev/tools/common
  */
 
 import type { JobKind, JobOutcome } from '@deepseek-ai/dsh-jobs'
@@ -131,7 +131,7 @@ export function startTaskJob(runtime: MediaRuntime, exec: ToolRunContext, record
       },
     })
   } catch (error) {
-    runtime.log(`dsh-media: could not start a background job for task ${record.id}: ${error instanceof Error ? error.message : String(error)}`)
+    runtime.log(`dsh-vibedev: could not start a background job for task ${record.id}: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
   }
 }
@@ -169,7 +169,7 @@ export async function submitTask(runtime: MediaRuntime, exec: ToolRunContext, dr
 }
 
 /** The sentence about an unconfirmed submission. */
-export const UNCONFIRMED_NOTE = 'The gateway did not confirm the submission; dsh-media keeps resending it for a few minutes under the same request key, '
+export const UNCONFIRMED_NOTE = 'The gateway did not confirm the submission; dsh-vibedev keeps resending it for a few minutes under the same request key, '
   + 'so it cannot be created twice. Do not submit it again.'
 
 /**

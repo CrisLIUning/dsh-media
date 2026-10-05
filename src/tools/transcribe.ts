@@ -1,7 +1,7 @@
 /**
  * `audio_transcribe`: speech to text with a VibeDev transcription model.
  * Short files answer directly; long ones become a task that is polled here.
- * @module dsh-media/tools/transcribe
+ * @module dsh-vibedev/tools/transcribe
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'

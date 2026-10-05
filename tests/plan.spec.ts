@@ -78,7 +78,7 @@ describe('planVideo', () => {
   })
 
   it('refuses a model whose capabilities it cannot read', () => {
-    expect(refusal(() => planVideo(model('future-video'), { prompt: 'p' })).message).toContain('update dsh-media')
+    expect(refusal(() => planVideo(model('future-video'), { prompt: 'p' })).message).toContain('update dsh-vibedev')
   })
 })
 

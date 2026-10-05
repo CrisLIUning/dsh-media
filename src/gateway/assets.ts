@@ -8,7 +8,7 @@
  * the returned upload headers when an upload is needed, `POST /{id}/complete`.
  * An asset the library already holds is read back through `/refresh`, which
  * also carries its measured duration.
- * @module dsh-media/gateway/assets
+ * @module dsh-vibedev/gateway/assets
  */
 
 import { createHash } from 'node:crypto'

@@ -2,7 +2,7 @@
  * Loading media inputs: a workspace path, an absolute path, an HTTP(S) link or a
  * `data:` URL. The type is read from the file's own header first, so a file
  * named `.png` that is really a JPEG is treated as a JPEG.
- * @module dsh-media/media/sources
+ * @module dsh-vibedev/media/sources
  */
 
 import { MediaError } from '../gateway/errors.js'

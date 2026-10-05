@@ -1,7 +1,7 @@
 /**
  * `image_generate`: generate images, or edit/derive from reference images,
  * save them in the workspace and show them to the model.
- * @module dsh-media/tools/image
+ * @module dsh-vibedev/tools/image
  */
 
 import { basename } from 'node:path'
@@ -247,7 +247,7 @@ export function imageGenerateTool(runtime: MediaRuntime): ToolDefinition {
         try {
           attachment = await attachments?.saveImage({ data: image.data, mediaType: image.mediaType as ImageMediaType, name: basename(image.absolutePath) })
         } catch (error) {
-          runtime.log(`dsh-media: could not attach ${basename(image.absolutePath)} for display: ${error instanceof Error ? error.message : String(error)}`)
+          runtime.log(`dsh-vibedev: could not attach ${basename(image.absolutePath)} for display: ${error instanceof Error ? error.message : String(error)}`)
         }
         images.push({
           path: runtime.display(exec, image.absolutePath), absolutePath: image.absolutePath, mediaType: image.mediaType, bytes: image.bytes,

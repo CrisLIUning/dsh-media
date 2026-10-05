@@ -3,7 +3,7 @@
  * option against what the chosen model declares, and build the request body.
  * Everything here runs before anything is uploaded or charged, so a request the
  * model cannot serve fails with a message that lists what it can.
- * @module dsh-media/video/plan
+ * @module dsh-vibedev/video/plan
  */
 
 import { MediaError } from '../gateway/errors.js'
@@ -111,7 +111,7 @@ function describeOptions(video: VideoCapabilities, constraint?: VideoModeConstra
 export function describeVideoModel(model: MediaModel): string {
   const video = model.video ?? {}
   if (video.unreadableModesVersion !== undefined) {
-    return `${model.id} declares capabilities in a format this plugin version does not read (modes schema ${video.unreadableModesVersion}); update dsh-media to use it.`
+    return `${model.id} declares capabilities in a format this plugin version does not read (modes schema ${video.unreadableModesVersion}); update dsh-vibedev to use it.`
   }
   const modes = effectiveVideoModes(video)
   const lines = VIDEO_MODES.filter(mode => modes[mode] !== undefined).map((mode) => {

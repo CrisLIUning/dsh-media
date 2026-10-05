@@ -2,7 +2,7 @@
  * Failures the plugin reports to the model: a gateway refusal, or a request the
  * plugin refused before anything was sent or charged. Messages are written for
  * the model to act on and relay to the user.
- * @module dsh-media/gateway/errors
+ * @module dsh-vibedev/gateway/errors
  */
 
 import { HarnessError } from '@deepseek-ai/dsh-llm'

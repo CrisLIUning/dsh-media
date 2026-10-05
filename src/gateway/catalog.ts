@@ -8,7 +8,7 @@
  * the versioned per-mode declarations (`modes_schema_version: 1`). A mode the
  * model does not list is unsupported; an unknown schema version makes the model
  * unusable rather than guessed at.
- * @module dsh-media/gateway/catalog
+ * @module dsh-vibedev/gateway/catalog
  */
 
 /** What a media model produces. */

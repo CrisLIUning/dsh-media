@@ -1,7 +1,7 @@
 /**
  * `media_models`: the media models this VibeDev account can use, with prices
  * and, for video, what each generation mode accepts.
- * @module dsh-media/tools/models
+ * @module dsh-vibedev/tools/models
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'

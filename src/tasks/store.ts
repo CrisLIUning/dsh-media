@@ -7,7 +7,7 @@
  * second one), and a task still running when the host restarts is followed to
  * the end. A claim file names the process following a task, so two processes
  * never poll and download the same one.
- * @module dsh-media/tasks/store
+ * @module dsh-vibedev/tasks/store
  */
 
 import { open, readdir, readFile, rm } from 'node:fs/promises'
