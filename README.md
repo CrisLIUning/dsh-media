@@ -86,8 +86,8 @@
 
 ## 从 dsh-media 升级
 
-- 在 VibeDev 插件中心里升级会自动完成：先装新包但不启用，再停用 `dsh-media`、启用新包，确认后卸载旧包。
-- 手动升级：安装 `@vibedev-si/dsh-vibedev`，然后在插件页停用并卸载 `dsh-media`（两个不要同时启用），完全退出再打开应用。
+- 在 VibeDev 插件中心（0.1.5 起）里点「一键切换」，或直接安装本插件、影视工作台或 AI 创作套装，都会自动切换：先装新包但不启用，再停用 `dsh-media`、启用新包，新包启用成功后才卸载旧包；新包启用失败时会把旧包重新启用。
+- 手动升级：先在插件页停用 `dsh-media`，再安装 `@vibedev-si/dsh-vibedev`，然后卸载 `dsh-media`，完全退出再打开应用。两个不能同时启用：它们注册同名的工具，后加载的那个会启动失败。
 - 登录状态、进行中的视频和音频任务都会保留，不用重新登录。插件页里的媒体设置（花费确认、保存目录、默认模型）会回到默认值，需要的话重新设一下。
 
 ## 隐私
@@ -135,7 +135,7 @@ Everything is paid from your VibeDev balance; the DeepSeek account stays DeepSee
 
 **Settings**: open "VibeDev Account & Models" on the Plugins page for the spending confirmation, the output folder and the default media models. `displayName`, `preferredModels`, `openBrowserOnSignIn` and `catalogRefreshMinutes` are set in the profile's `cordis.patch.yml` row `dsh-vibedev`.
 
-**Upgrading from dsh-media**: the VibeDev Plugin Center upgrades it for you; by hand, install `@vibedev-si/dsh-vibedev`, then disable and uninstall `dsh-media` (never keep both enabled) and restart the app fully. The sign-in and running video and audio tasks carry over; the media settings go back to their defaults.
+**Upgrading from dsh-media**: the VibeDev Plugin Center (0.1.5 or later) switches it over for you, from its banner or when you install this plugin, the film workbench or the AI Creator Suite: the new package is installed disabled, `dsh-media` is disabled, the new one enabled, and `dsh-media` removed only after that worked. By hand, disable `dsh-media` first, install `@vibedev-si/dsh-vibedev`, uninstall `dsh-media` and restart the app fully. The two cannot both be enabled: they register the same tool names, and whichever loads second fails to start. The sign-in and running video and audio tasks carry over; the media settings go back to their defaults.
 
 **Privacy**: prompts and reference media are sent to the VibeDev gateway, which forwards them to the model provider. The plugin's own sign-in is kept in the DeepSeek Harness credential store, and task records under `dsh-media/` in the DeepSeek Harness data folder (the former name, kept so an upgrade loses nothing).
 
