@@ -8,6 +8,7 @@ import { Context } from '@deepseek-ai/cordis'
 import LlmRuntime, { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import WebRuntime from '@deepseek-ai/dsh-web'
 import type { ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import * as Media from '../src/index.js'
 import { CATALOG, MP4, PNG, WAV } from './fixtures.js'
@@ -201,6 +202,45 @@ describe('dsh-vibedev: the VibeDev models and the account routes', () => {
     await new Promise(resolve => setTimeout(resolve, 30))
     expect(await ctx.llm.listModels(Media.VIBEDEV_ROUTE)).toEqual([])
     expect(seen.filter(item => item.url === `${GATEWAY}/v1/models`)).toEqual([])
+    await ctx.fiber.dispose()
+  })
+})
+
+describe('dsh-vibedev: web search', () => {
+  async function loadWithWeb(searchProvider: string) {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(WebRuntime, { searchProvider })
+    await ctx.plugin(Media, { gatewayOrigin: `${GATEWAY}/`, apiKeyEnv: 'DSH_MEDIA_TEST_KEY', stateDir: dir })
+    return ctx
+  }
+
+  it('searches through the gateway when a profile selects vibedev-gateway', async () => {
+    routes[`POST ${GATEWAY}/v1/vibedev/web-search`] = () => json(200, { results: [{ url: 'https://example.com/', title: 'Example' }] })
+    const ctx = await loadWithWeb(Media.SEARCH_PROVIDER_ID)
+
+    const result = await ctx.web.search({ query: 'example', maxResults: 5 })
+
+    expect(result).toEqual({ sources: [{ url: 'https://example.com/', title: 'Example' }], truncated: false })
+    const request = seen.find(item => item.url === `${GATEWAY}/v1/vibedev/web-search`)
+    expect(request?.headers).toMatchObject({ authorization: 'Bearer dev-key' })
+    expect(JSON.parse(String(request?.body))).toEqual({ query: 'example', max_results: 5 })
+    await ctx.fiber.dispose()
+  })
+
+  it('asks for a VibeDev sign-in while nobody is signed in, without calling the gateway', async () => {
+    vi.stubEnv('DSH_MEDIA_TEST_KEY', '')
+    const ctx = await loadWithWeb(Media.SEARCH_PROVIDER_ID)
+    await expect(ctx.web.search({ query: 'example' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_CREDENTIAL_MISSING' })
+    expect(seen.filter(item => item.url.endsWith('/v1/vibedev/web-search'))).toEqual([])
+    await ctx.fiber.dispose()
+  })
+
+  it('only registers the provider: a profile that selects another one never searches through VibeDev', async () => {
+    const ctx = await loadWithWeb('some-other-provider')
+    await expect(ctx.web.search({ query: 'example' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_CONFIGURED_MISSING' })
+    expect(seen.filter(item => item.url.endsWith('/v1/vibedev/web-search'))).toEqual([])
     await ctx.fiber.dispose()
   })
 })

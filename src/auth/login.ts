@@ -63,6 +63,8 @@ export interface PluginLoginOptions {
   readonly openBrowser?: (url: string) => Promise<boolean>
   /** How long a started sign-in waits for the browser. Defaults to 5 minutes. */
   readonly signInTimeoutMs?: number
+  /** The client name the gateway records for the sign-in (it picks the key the usage is billed to). Defaults to `vibedev-plugin`. */
+  readonly client?: string
   readonly log?: (message: string) => void
 }
 
@@ -342,7 +344,7 @@ export class PluginLogin {
     const port = (server.address() as AddressInfo).port
     const callback = `http://127.0.0.1:${port}${CALLBACK_PATH}`
     const url = `${this.origin}/vibedev-link?${new URLSearchParams({
-      callback, state, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', client: 'vibedev-plugin',
+      callback, state, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', client: this.options.client ?? 'vibedev-plugin',
     }).toString()}`
     const timeoutMs = this.options.signInTimeoutMs ?? 5 * 60_000
     const timer = setTimeout(() => {
@@ -368,7 +370,7 @@ export class PluginLogin {
 
   private async redeem(code: string, verifier: string): Promise<PluginGrant> {
     const response = await this.post('/api/v1/vibedev/link/redeem', {
-      code, code_verifier: verifier, token_type: 'app', client: 'vibedev-plugin',
+      code, code_verifier: verifier, token_type: 'app', client: this.options.client ?? 'vibedev-plugin',
       device_id: await this.options.storage.deviceId(),
       device_model: `${platform()}-${arch()}`.slice(0, 128),
       os_version: release().slice(0, 128),

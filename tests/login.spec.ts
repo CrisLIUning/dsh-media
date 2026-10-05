@@ -82,6 +82,22 @@ describe('PluginLogin', () => {
     expect(login.pendingSignIn()).toBeUndefined()
   })
 
+  it('reports the configured client name on the link page and at redeem (the VibeDev app bills to its own key)', async () => {
+    const gateway = fakeFetch(json(200, tokens(1)))
+    let opened: URL | undefined
+    const login = new PluginLogin({
+      origin: ORIGIN, storage: memory(), userAgent: 'ua', fetch: gateway.fetch, now: () => NOW, client: 'vibedev-desktop',
+      openBrowser: async (url) => {
+        opened = new URL(url)
+        void globalThis.fetch(`${opened.searchParams.get('callback')}?code=code-1&state=${opened.searchParams.get('state')}`)
+        return true
+      },
+    })
+    await (await login.startSignIn()).done
+    expect(opened?.searchParams.get('client')).toBe('vibedev-desktop')
+    expect(bodyOf(gateway.seen[0])).toMatchObject({ client: 'vibedev-desktop' })
+  })
+
   it('ignores a callback with the wrong state, and gives up when the browser never returns', async () => {
     let response: Promise<Response> | undefined
     const login = new PluginLogin({

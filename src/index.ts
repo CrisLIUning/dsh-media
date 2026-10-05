@@ -33,6 +33,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-user-approval'
+import type {} from '@deepseek-ai/dsh-web'
 import Schema from '@deepseek-ai/schemastery'
 import { AccountService, accountRoutes } from './account/index.js'
 import { CredentialChain, grantStorage } from './auth/credentials.js'
@@ -42,6 +43,7 @@ import type { GatewayModels } from './llm/index.js'
 import { MediaLibrary } from './gateway/assets.js'
 import { GatewayHttp } from './gateway/http.js'
 import { MediaRuntime } from './runtime.js'
+import { GatewaySearchProvider } from './search/provider.js'
 import { MediaHostService } from './service.js'
 import type { ModelSlot } from './runtime.js'
 import { TaskStore } from './tasks/store.js'
@@ -64,6 +66,7 @@ export { parseMediaCatalog } from './gateway/catalog.js'
 export type { MediaModel, VideoCapabilities, VideoMode } from './gateway/catalog.js'
 export { ACCOUNT_ROUTE_PREFIX, AccountService } from './account/index.js'
 export type { AccountSource, AccountView } from './account/index.js'
+export { GATEWAY_SEARCH_PROVIDER_ID as SEARCH_PROVIDER_ID } from './search/provider.js'
 export { INSUFFICIENT_BALANCE_CODE, SIGN_IN_REQUIRED_CODE, VIBEDEV_ROUTE } from './llm/index.js'
 
 /** The package version, sent in the `User-Agent` the gateway attributes plugin traffic by. */
@@ -93,6 +96,8 @@ export interface Config {
   transcriptionModel: Volatile<string>
   /** Gateway origin. */
   gatewayOrigin: string
+  /** Client name sent with the sign-in (`vibedev-plugin` in DeepSeek Harness; the VibeDev app sets its own). */
+  client: string
   /** Environment variable holding a development key, used only while nobody is signed in. */
   apiKeyEnv: string
   /** Where tasks and the plugin's own sign-in are kept; empty for `<harness home>/dsh-media`. */
@@ -112,6 +117,7 @@ export const Config = Schema.object({
   podcastModel: Schema.string().default('').volatile(),
   transcriptionModel: Schema.string().default('').volatile(),
   gatewayOrigin: Schema.string().default('https://vibedev.jzsaas.com'),
+  client: Schema.string().default('vibedev-plugin'),
   apiKeyEnv: Schema.string().default('VIBEDEV_GATEWAY_API_KEY'),
   stateDir: Schema.string().default(''),
 }).i18n({
@@ -128,6 +134,7 @@ export const Config = Schema.object({
     podcastModel: '默认播客模型（留空自动选择）',
     transcriptionModel: '默认语音转写模型（留空自动选择）',
     gatewayOrigin: 'VibeDev 网关地址',
+    client: '登录时报给网关的客户端名称（决定用量记在哪个密钥下）',
     apiKeyEnv: '开发用密钥所在的环境变量（仅在未登录时使用）',
     stateDir: '插件数据目录（留空为默认）',
   },
@@ -144,6 +151,7 @@ export const Config = Schema.object({
     podcastModel: 'Default podcast model (empty: chosen automatically)',
     transcriptionModel: 'Default transcription model (empty: chosen automatically)',
     gatewayOrigin: 'VibeDev gateway address',
+    client: 'Client name reported to the gateway at sign-in (decides which key the usage is recorded under)',
     apiKeyEnv: 'Environment variable with a development key (used only while signed out)',
     stateDir: 'Plugin data folder (empty for the default)',
   },
@@ -164,7 +172,7 @@ export function apply(ctx: Context, config: Config): void {
 
   const storage = grantStorage(stateDir, () => ctx.get('credentials'))
   const login = new PluginLogin({
-    origin, userAgent, log: warn, storage,
+    origin, userAgent, log: warn, storage, client: config.client.trim() || 'vibedev-plugin',
     openBrowser: url => config.openBrowserOnSignIn ? openInBrowser(url) : Promise.resolve(false),
   })
   const chain = new CredentialChain({
@@ -225,6 +233,21 @@ export function apply(ctx: Context, config: Config): void {
       catalogRefreshMinutes: config.catalogRefreshMinutes,
     })
     llmCtx.effect(() => () => { route = undefined }, 'dsh-vibedev: route state')
+  })
+
+  // Web search through the gateway, as the provider `vibedev-gateway`. Registering does not select it: DeepSeek
+  // Harness keeps its own search unless a profile sets `web.searchProvider: vibedev-gateway` (the VibeDev app does).
+  ctx.inject(['web'], (webCtx) => {
+    // The web service unregisters it with this fiber.
+    webCtx.web.registerSearchProvider(new GatewaySearchProvider({
+      endpoint: `${origin}/v1/vibedev/web-search`,
+      resolveCredential: () => chain.resolve(),
+      rejectCredential: credential => chain.reject(credential),
+      userAgent,
+      requestTimeoutMs: 20_000,
+      maxRetries: 2,
+      maxRetryWaitMs: 10_000,
+    }))
   })
 
   // The account pages' routes (sidebar status, Settings → VibeDev 账号).
