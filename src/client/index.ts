@@ -3,7 +3,9 @@
  *
  * - Settings → VibeDev 账号 (`settings.section`): sign in to VibeDev, who is
  *   signed in, the balance, the VibeDev models in the pickers, top up, sign out;
- * - the sidebar foot's VibeDev status (`sidebar.footer.action`);
+ * - the sidebar foot's VibeDev status (`sidebar.footer.action`), or, where the
+ *   VibeDev account is the app's main account (the VibeDev app), the account row
+ *   at the very foot (`settings.launcher`) and the first Settings section;
  * - the plugin's settings page on the Plugins page (`plugins.bundle.config`,
  *   under the bundle's package name, while the Host serves the plugin's
  *   settings namespace), edited through the shared configuration form.
@@ -26,6 +28,7 @@ import { AccountStore } from './account-store.ts'
 import { FIELDS, SETTINGS_NAMESPACE, fieldSpecs } from './fields.ts'
 import { en, zh } from './locales.ts'
 import { MediaSettingsPage, type PageState, type Translate } from './SettingsPage.tsx'
+import { PrimaryLauncher, type LauncherOwner } from './PrimaryLauncher.tsx'
 import { SidebarAccount } from './SidebarAccount.tsx'
 
 /** The package name the Plugins page keys a bundle's configuration by. */
@@ -36,6 +39,10 @@ const LOCALE_NAMESPACE = 'dsh-vibedev'
 const ROUTE_NAME = 'VibeDev'
 /** Where the section sits in Settings: after the DeepSeek account (-10), before General (0). */
 const SECTION_ORDER = -5
+/** As the app's main account: before the DeepSeek account's section, so Settings opens on it. */
+const PRIMARY_SECTION_ORDER = -20
+/** Below the default the DeepSeek account launcher registers with, so this row is the one the foot shows. */
+const LAUNCHER_PRIORITY = -1
 
 interface LocaleService {
   register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): unknown
@@ -95,19 +102,41 @@ export function apply(ctx: ClientContext): void {
   const account = new AccountStore(windowOptions())
   ctx.effect(() => account.start(), 'dsh-vibedev: account reads')
 
-  ctx.effect(() => ctx.slots.inject('settings.section', () => ctx.slots.register({
+  const section = (order: number) => disposer(ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
     id: 'vibedev-account',
-    order: SECTION_ORDER,
+    order,
     label: () => t('accountNav'),
     locale: LOCALE_NAMESPACE,
-  }, () => h(AccountSection, { t, store: account, routeName: ROUTE_NAME }))), 'dsh-vibedev: account section')
-
-  ctx.effect(() => ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
+  }, () => h(AccountSection, { t, store: account, routeName: ROUTE_NAME }))))
+  // The main account: the row at the very foot of the sidebar, in place of the Harness's account launcher.
+  const launcher = () => disposer(ctx.slots.inject('settings.launcher', () => ctx.slots.register({
+    name: 'settings.launcher',
+    priority: LAUNCHER_PRIORITY,
+    locale: LOCALE_NAMESPACE,
+  }, (owner = {}) => h(PrimaryLauncher, { t, store: account, owner: owner as LauncherOwner }))))
+  // Next to the Harness's own account: a small status entry above it.
+  const status = () => disposer(ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({
     name: 'sidebar.footer.action',
     id: 'vibedev-account',
     locale: LOCALE_NAMESPACE,
-  }, (owner = {}) => h(SidebarAccount, { t, store: account, wide: owner.wide !== false }))), 'dsh-vibedev: sidebar status')
+  }, (owner = {}) => h(SidebarAccount, { t, store: account, wide: owner.wide !== false }))))
+
+  // The Host says once whether the VibeDev account is the app's main one; until then nothing is placed.
+  ctx.effect(() => {
+    let placed: Array<() => void> | undefined
+    const place = () => {
+      const view = account.getSnapshot().view
+      if (view === undefined || placed !== undefined) return
+      placed = view.primary === true ? [section(PRIMARY_SECTION_ORDER), launcher()] : [section(SECTION_ORDER), status()]
+    }
+    const unsubscribe = account.subscribe(place)
+    place()
+    return () => {
+      unsubscribe()
+      for (const off of placed ?? []) off()
+    }
+  }, 'dsh-vibedev: account placement')
 
   // Nested: a host without the configuration forms service keeps the plugin
   // running and simply shows no settings page.
@@ -127,7 +156,24 @@ export function apply(ctx: ClientContext): void {
         locale: LOCALE_NAMESPACE,
         inject: () => ({ t }),
       }, (owner = {}) => owner.view === 'summary' ? null : h(MediaSettingsPage, { t, store, actions })))
+      // As the app's main account the plugin is built in and not listed on the Plugins page, so the same page
+      // gets a Settings section of its own, right after the account's.
+      let section: (() => void) | undefined
+      const placeSection = () => {
+        if (section !== undefined || account.getSnapshot().view?.primary !== true) return
+        section = disposer(scoped.slots.inject('settings.section', () => scoped.slots.register({
+          name: 'settings.section',
+          id: 'vibedev-media',
+          order: PRIMARY_SECTION_ORDER + 1,
+          label: () => t('mediaNav'),
+          locale: LOCALE_NAMESPACE,
+        }, () => h(MediaSettingsPage, { t, store, actions }))))
+      }
+      const unsubscribe = account.subscribe(placeSection)
+      placeSection()
       return () => {
+        unsubscribe()
+        section?.()
         disposer(off)()
         model.dispose()
       }

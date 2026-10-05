@@ -98,6 +98,8 @@ export interface Config {
   gatewayOrigin: string
   /** Client name sent with the sign-in (`vibedev-plugin` in DeepSeek Harness; the VibeDev app sets its own). */
   client: string
+  /** The VibeDev account is the app's main account: its row leads the sidebar foot and Settings (the VibeDev app). */
+  primary: boolean
   /** Environment variable holding a development key, used only while nobody is signed in. */
   apiKeyEnv: string
   /** Where tasks and the plugin's own sign-in are kept; empty for `<harness home>/dsh-media`. */
@@ -118,6 +120,7 @@ export const Config = Schema.object({
   transcriptionModel: Schema.string().default('').volatile(),
   gatewayOrigin: Schema.string().default('https://vibedev.jzsaas.com'),
   client: Schema.string().default('vibedev-plugin'),
+  primary: Schema.boolean().default(false),
   apiKeyEnv: Schema.string().default('VIBEDEV_GATEWAY_API_KEY'),
   stateDir: Schema.string().default(''),
 }).i18n({
@@ -135,6 +138,7 @@ export const Config = Schema.object({
     transcriptionModel: '默认语音转写模型（留空自动选择）',
     gatewayOrigin: 'VibeDev 网关地址',
     client: '登录时报给网关的客户端名称（决定用量记在哪个密钥下）',
+    primary: '作为应用的主账号：侧边栏底部的账号行和设置里的第一个分区（VibeDev 应用）',
     apiKeyEnv: '开发用密钥所在的环境变量（仅在未登录时使用）',
     stateDir: '插件数据目录（留空为默认）',
   },
@@ -152,6 +156,7 @@ export const Config = Schema.object({
     transcriptionModel: 'Default transcription model (empty: chosen automatically)',
     gatewayOrigin: 'VibeDev gateway address',
     client: 'Client name reported to the gateway at sign-in (decides which key the usage is recorded under)',
+    primary: 'Act as the main account of the app: the account row at the foot of the sidebar and the first Settings section (the VibeDev app)',
     apiKeyEnv: 'Environment variable with a development key (used only while signed out)',
     stateDir: 'Plugin data folder (empty for the default)',
   },
@@ -252,7 +257,7 @@ export function apply(ctx: Context, config: Config): void {
 
   // The account pages' routes (sidebar status, Settings → VibeDev 账号).
   const account = new AccountService({
-    origin, userAgent, chain, login,
+    origin, userAgent, chain, login, primary: config.primary,
     models: () => ({ count: route?.models().length ?? 0, ...route?.hidden() === undefined ? {} : { hidden: route.hidden() } }),
   })
   ctx.inject(['connection'], (scoped) => {

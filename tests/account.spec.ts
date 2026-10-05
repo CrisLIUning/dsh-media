@@ -9,7 +9,7 @@ import type { GatewayCredential } from '../src/gateway/http.js'
 const ORIGIN = 'https://gw.test'
 
 /** A credential chain and plugin sign-in double. */
-function bench(credential: GatewayCredential | undefined, options: { user?: PluginGrant['user']; me?: () => Response } = {}) {
+function bench(credential: GatewayCredential | undefined, options: { user?: PluginGrant['user']; me?: () => Response; primary?: boolean } = {}) {
   let current = credential
   const login = {
     pendingSignIn: vi.fn((): { url: string; expiresAt: number } | undefined => undefined),
@@ -27,6 +27,7 @@ function bench(credential: GatewayCredential | undefined, options: { user?: Plug
     models: () => ({ count: current === undefined ? 0 : 3, ...current === undefined ? { hidden: 'signed-out' as const } : {} }),
     fetch: fetch as unknown as typeof globalThis.fetch,
     now: () => now,
+    ...options.primary === undefined ? {} : { primary: options.primary },
   })
   return { account, login, chain, fetch, advance: (ms: number) => { now += ms } }
 }
@@ -39,8 +40,14 @@ describe('AccountService', () => {
       source: 'none',
       models: { count: 0, hidden: 'signed-out' },
       links: { topUp: `${ORIGIN}/purchase`, register: ORIGIN, usage: `${ORIGIN}/usage` },
+      primary: false,
     })
     expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('says when the VibeDev account is the app’s main account', async () => {
+    expect((await bench(undefined, { primary: true }).account.view()).primary).toBe(true)
+    expect((await bench({ token: 'vdat_1', kind: 'plugin' }, { primary: true }).account.view()).primary).toBe(true)
   })
 
   it('shows the plugin sign-in with the person and the balance from the gateway', async () => {

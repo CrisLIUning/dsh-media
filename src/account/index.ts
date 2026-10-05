@@ -44,6 +44,8 @@ export interface AccountView {
   readonly models: { readonly count: number; readonly hidden?: 'signed-out' | 'host-account' }
   /** Pages on the gateway's site. */
   readonly links: { readonly topUp: string; readonly register: string; readonly usage: string }
+  /** The VibeDev account is the app's main account (the VibeDev app): its row leads the sidebar foot and Settings. */
+  readonly primary: boolean
 }
 
 /** What the account routes need from the plugin. */
@@ -54,6 +56,8 @@ export interface AccountServiceOptions {
   readonly login: PluginLogin
   /** The VibeDev route's model count and why it is empty. */
   readonly models: () => { count: number; hidden?: 'signed-out' | 'host-account' }
+  /** Present the VibeDev account as the app's main account. */
+  readonly primary?: boolean
   readonly fetch?: typeof globalThis.fetch
   readonly now?: () => number
 }
@@ -90,7 +94,10 @@ export class AccountService {
     const credential = await this.options.chain.resolve().catch(() => undefined)
     const source: AccountSource = credential === undefined ? 'none' : credential.kind === 'account' ? 'host' : credential.kind
     const pending = this.options.login.pendingSignIn()
-    const base = { source, models: this.options.models(), links: this.links(), ...pending === undefined ? {} : { pending } }
+    const base = {
+      source, models: this.options.models(), links: this.links(), primary: this.options.primary === true,
+      ...pending === undefined ? {} : { pending },
+    }
     if (credential === undefined) return base
     const grantUser = credential.kind === 'plugin' ? await this.options.login.user().catch(() => undefined) : undefined
     const me = await this.me(credential.token, fresh)

@@ -33,6 +33,7 @@ export const zh = {
   invalid: '这个值无效',
 
   accountNav: 'VibeDev 账号',
+  mediaNav: 'VibeDev 媒体生成',
   accountTitle: 'VibeDev 账号',
   accountIntro: '登录 VibeDev 后，模型选择器里会多出「{name}」一组模型（如 Claude、GPT 等），也能让 Agent 生成图片、视频和音乐。费用从你的 VibeDev 余额中扣除，和 DeepSeek 账号互不影响。',
   signedOutStatus: '未登录',
@@ -64,6 +65,8 @@ export const zh = {
   sidebarPending: '正在登录 VibeDev…',
   sidebarMenu: 'VibeDev 账号',
   sidebarIntro: '登录后可用 VibeDev 的模型和媒体生成',
+  settings: '设置',
+  accountMenu: 'VibeDev 账号菜单',
 } as const
 
 /** Keys of the dictionary. */
@@ -98,6 +101,7 @@ export const en: Record<MediaSettingsKey, string> = {
   invalid: 'Not a valid value',
 
   accountNav: 'VibeDev account',
+  mediaNav: 'VibeDev media',
   accountTitle: 'VibeDev account',
   accountIntro: 'Once you sign in to VibeDev, the model picker gains a "{name}" group (Claude, GPT and more), and the agent can generate images, video and music. Everything is paid from your VibeDev balance, separately from the DeepSeek account.',
   signedOutStatus: 'Not signed in',
@@ -129,6 +133,8 @@ export const en: Record<MediaSettingsKey, string> = {
   sidebarPending: 'Signing in to VibeDev…',
   sidebarMenu: 'VibeDev account',
   sidebarIntro: 'Sign in to use the VibeDev models and media generation',
+  settings: 'Settings',
+  accountMenu: 'VibeDev account menu',
 }
 
 /**

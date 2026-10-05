@@ -17,6 +17,8 @@ export interface AccountView {
   readonly pending?: { readonly url: string; readonly expiresAt: number }
   readonly models: { readonly count: number; readonly hidden?: 'signed-out' | 'host-account' }
   readonly links: { readonly topUp: string; readonly register: string; readonly usage: string }
+  /** The VibeDev account is the app's main account (absent from older Hosts: not). */
+  readonly primary?: boolean
 }
 
 /** What the pages render. */
