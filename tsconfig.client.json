@@ -15,5 +15,6 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src/client"]
+  // The placement test drives the browser half's entry, so it is typechecked here too.
+  "include": ["src/client", "tests/client-placement.spec.ts"]
 }

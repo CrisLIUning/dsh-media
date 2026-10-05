@@ -24,6 +24,7 @@
     "tests"
   ],
   "exclude": [
-    "src/client"
+    "src/client",
+    "tests/client-placement.spec.ts"
   ]
 }
