@@ -122,13 +122,14 @@ export function apply(ctx: ClientContext): void {
     locale: LOCALE_NAMESPACE,
   }, (owner = {}) => h(SidebarAccount, { t, store: account, wide: owner.wide !== false }))))
 
-  // The Host says once whether the VibeDev account is the app's main one; until then nothing is placed.
+  // The Host says once whether the VibeDev account is the app's main one; until it answers nothing is placed. A first
+  // read that fails places the plugin next to the Harness's account, so its section can show the failure and retry.
   ctx.effect(() => {
     let placed: Array<() => void> | undefined
     const place = () => {
-      const view = account.getSnapshot().view
-      if (view === undefined || placed !== undefined) return
-      placed = view.primary === true ? [section(PRIMARY_SECTION_ORDER), launcher()] : [section(SECTION_ORDER), status()]
+      const { view, loadFailed } = account.getSnapshot()
+      if (placed !== undefined || (view === undefined && !loadFailed)) return
+      placed = view?.primary === true ? [section(PRIMARY_SECTION_ORDER), launcher()] : [section(SECTION_ORDER), status()]
     }
     const unsubscribe = account.subscribe(place)
     place()
