@@ -7,7 +7,7 @@
 import type { SettingsFieldSpec } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** The settings namespace: the plugin's profile entry id. */
-export const SETTINGS_NAMESPACE = 'dsh-media'
+export const SETTINGS_NAMESPACE = 'dsh-vibedev'
 
 /** The model slots, in page order. */
 export const MODEL_FIELDS = ['imageModel', 'videoModel', 'musicModel', 'podcastModel', 'transcriptionModel'] as const

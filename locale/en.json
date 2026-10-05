@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "VibeDev Media",
-    "description": "Lets the agent generate images, videos, music and podcasts and transcribe speech; results are saved in the workspace and paid from your VibeDev balance."
+    "title": "VibeDev Account & Models",
+    "description": "Sign in to VibeDev (next to the DeepSeek account) to use the VibeDev gateway's models (Claude, GPT and more) in the model picker, and let the agent generate images, videos, music and podcasts and transcribe speech; paid from your VibeDev balance."
   }
 }

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "VibeDev 媒体生成",
-    "description": "让 Agent 生成图片、视频、音乐和播客，并把语音转成文字；结果保存在工作区，费用从 VibeDev 余额扣除。"
+    "title": "VibeDev 账号与模型",
+    "description": "登录 VibeDev 账号（与 DeepSeek 账号并存），在模型选择器里使用 VibeDev 网关的模型（Claude、GPT 等），并让 Agent 生成图片、视频、音乐和播客、转写语音；费用从 VibeDev 余额扣除。"
   }
 }

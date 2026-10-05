@@ -1,5 +1,5 @@
 /**
- * The dsh-media settings page on the Plugins page: spending confirmation, the
+ * The dsh-vibedev settings page on the Plugins page: spending confirmation, the
  * output folder, the pinned models, and how the account works. Edits are
  * staged and written together by the save, like every settings page there.
  */
@@ -94,11 +94,11 @@ export function MediaSettingsPage({ t, store, actions }: { t: Translate; store: 
         </div>
       </Section>
       <Section title={t('output')}>
-        <SettingsValueField id="dsh-media-output-dir" label={t('outputDir')} hint={t('outputDirHint')} placeholder="media" {...textField('outputDir')} />
+        <SettingsValueField id="dsh-vibedev-output-dir" label={t('outputDir')} hint={t('outputDirHint')} placeholder="media" {...textField('outputDir')} />
       </Section>
       <Section title={t('models')} hint={t('modelsHint')}>
         {MODEL_FIELDS.map(field => (
-          <SettingsValueField key={field} id={`dsh-media-${field}`} label={t(field)} placeholder={t('modelPlaceholder')} {...textField(field)} />
+          <SettingsValueField key={field} id={`dsh-vibedev-${field}`} label={t(field)} placeholder={t('modelPlaceholder')} {...textField(field)} />
         ))}
       </Section>
       <Section title={t('account')}>

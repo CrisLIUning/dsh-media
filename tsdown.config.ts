@@ -1,5 +1,5 @@
 /**
- * Browser half of dsh-media, built the way DeepSeek Harness loads an external
+ * Browser half of dsh-vibedev, built the way DeepSeek Harness loads an external
  * package's client: one closure-factory file that calls
  * `window.__ModuleLoader__.load({ id, factory })` and gets React and the client
  * primitives through the injected `require` (the Host's module table).
@@ -8,7 +8,7 @@
  */
 import { defineConfig } from 'tsdown'
 
-const id = 'dsh-media'
+const id = '@vibedev-si/dsh-vibedev'
 
 /** Modules the Host's module table provides; a `require` it cannot answer throws at load. */
 const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', '@deepseek-ai/dsh-client-ui-primitives']
@@ -23,8 +23,10 @@ export default defineConfig({
   dts: false,
   sourcemap: false,
   clean: true,
-  external: [...CLIENT_EXTERNALS],
-  noExternal: (source: string) => (CLIENT_EXTERNALS.includes(source) ? undefined : true),
+  deps: {
+    neverBundle: [...CLIENT_EXTERNALS],
+    alwaysBundle: (source: string) => (CLIENT_EXTERNALS.includes(source) ? undefined : true),
+  },
   define: {
     'process.env.NODE_ENV': JSON.stringify('production'),
   },

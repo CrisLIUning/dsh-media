@@ -1,4 +1,5 @@
-# 把媒体生成插件插入 profile。
+# 把 VibeDev 账号与模型插件（原 dsh-media）插入 profile。行 id 即插件的设置命名空间；
+# name 必须等于包名，浏览器端模块按它解析 ./client。
 - insert:
-    - id: dsh-media
-      name: dsh-media
+    - id: dsh-vibedev
+      name: '@vibedev-si/dsh-vibedev'
