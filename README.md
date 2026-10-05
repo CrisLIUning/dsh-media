@@ -3,7 +3,8 @@
 在 DeepSeek Harness 里登录 VibeDev 账号，和 DeepSeek 账号并存：
 
 - **VibeDev 的模型**：登录后，模型选择器里会多出「VibeDev」一组（Claude、GPT 等网关提供的模型），和 DeepSeek 的模型并列，选中就能用；
-- **媒体生成**：Agent 可以生成图片、视频、音乐和播客，并把语音转成文字，结果保存在工作区的 `media/` 目录下。
+- **媒体生成**：Agent 可以生成图片、视频、音乐和播客，并把语音转成文字，结果保存在工作区的 `media/` 目录下；
+- **网页搜索**：提供走 VibeDev 网关的网页搜索，见下面的「网页搜索」。
 
 费用都从你的 VibeDev 余额里扣，DeepSeek 账号照常由 DeepSeek Harness 自己管理，两边互不影响。还没有 VibeDev 账号的话，可以在 [vibedev.jzsaas.com](https://vibedev.jzsaas.com) 注册。
 
@@ -26,9 +27,9 @@
   dsh plugin --profile desktop add @vibedev-si/dsh-vibedev
   ```
 
-- **VibeDev 应用**：插件直接使用 VibeDev 已登录的账号，不需要再登录；模型由应用自己的模型列表提供，插件不会重复列出。
+- **VibeDev 应用**：已内置本插件，不用另装。VibeDev 账号就是应用的主账号：侧边栏最底下一行和设置里的第一项都是它，DeepSeek 账号作为第二个账号显示在它上方。
 
-新版本在 npm 上发布后的 24 小时内，只写包名可能装到上一个版本（pnpm 默认不装发布未满一天的版本），想马上用新版就写明版本号，例如 `@vibedev-si/dsh-vibedev@0.2.0`。
+新版本在 npm 上发布后的 24 小时内，只写包名可能装到上一个版本（pnpm 默认不装发布未满一天的版本），想马上用新版就写明版本号，例如 `@vibedev-si/dsh-vibedev@0.2.1`。
 
 ## 登录 VibeDev
 
@@ -42,6 +43,10 @@
 - 模型在选择器里的「VibeDev」组；默认模型仍是 DeepSeek Harness 原来的，想用 VibeDev 的模型就在选择器里选。
 - 没登录就用了 VibeDev 的模型，或登录已失效时，对话里会提示到侧边栏或设置里登录；余额不足时会提示并给出充值链接。这些提示和 DeepSeek 账号的登录、充值提示是分开的。
 - 访问令牌过期时插件会自动续期并重发请求，不会重复输出。
+
+## 网页搜索
+
+插件注册了一个网页搜索提供方 `vibedev-gateway`，用你的 VibeDev 登录调用网关的搜索。注册不等于启用：DeepSeek Harness 默认仍用自己的搜索；想改用 VibeDev 的，在配置文件里把 `web` 一行的 `searchProvider` 设为 `vibedev-gateway`（VibeDev 应用默认就是这样）。搜索本身不收费，但余额为零时网关会拒绝所有请求，包括搜索。
 
 ## 媒体工具
 
@@ -82,7 +87,7 @@
 | 保存目录 | `media` | 相对于工作区。 |
 | 默认生图 / 视频 / 音乐 / 播客 / 转写模型 | 空 | 留空时由 Agent 按模型目录选择。 |
 
-另有几项只能在配置文件（`cordis.patch.yml` 中 `dsh-vibedev` 一行）里改：`displayName`（模型选择器里显示的组名，默认 `VibeDev`）、`preferredModels`（排在最前的 VibeDev 模型）、`openBrowserOnSignIn`（登录时是否自动打开系统浏览器，默认开）、`catalogRefreshMinutes`（模型目录刷新间隔，默认 30 分钟）。
+另有几项只能在配置文件（`cordis.patch.yml` 中 `dsh-vibedev` 一行）里改：`displayName`（模型选择器里显示的组名，默认 `VibeDev`）、`preferredModels`（排在最前的 VibeDev 模型）、`openBrowserOnSignIn`（登录时是否自动打开系统浏览器，默认开）、`catalogRefreshMinutes`（模型目录刷新间隔，默认 30 分钟）、`client`（登录时报给网关的客户端名称，默认 `vibedev-plugin`）、`primary`（作为应用的主账号显示，默认关，VibeDev 应用里开）。
 
 ## 从 dsh-media 升级
 
@@ -123,17 +128,19 @@ Sign in to VibeDev in DeepSeek Harness, next to the DeepSeek account:
 
 Everything is paid from your VibeDev balance; the DeepSeek account stays DeepSeek Harness's own, and the two do not affect each other. To create an account, register at [vibedev.jzsaas.com](https://vibedev.jzsaas.com). This plugin was renamed from `dsh-media`.
 
-**Install**: install `@vibedev-si/dsh-vibedev` by package name on the Plugins page (the `@vibedev-si/` scope is required), or from the [VibeDev Plugin Center](https://github.com/VibeDev-Si/dsh-ecosystem); from the command line, `dsh plugin add @vibedev-si/dsh-vibedev`, or `dsh plugin --profile desktop add @vibedev-si/dsh-vibedev` for the desktop app (quit it fully first). In the VibeDev app the app's signed-in account is used and the app lists the models itself. Within 24 hours of a release, name the version (e.g. `@vibedev-si/dsh-vibedev@0.2.0`): pnpm does not install versions younger than a day by default.
+**Install**: install `@vibedev-si/dsh-vibedev` by package name on the Plugins page (the `@vibedev-si/` scope is required), or from the [VibeDev Plugin Center](https://github.com/VibeDev-Si/dsh-ecosystem); from the command line, `dsh plugin add @vibedev-si/dsh-vibedev`, or `dsh plugin --profile desktop add @vibedev-si/dsh-vibedev` for the desktop app (quit it fully first). The VibeDev app ships with the plugin built in, and there the VibeDev account is the main account (the bottom row of the sidebar and the first Settings section), with the DeepSeek account as the second one. Within 24 hours of a release, name the version (e.g. `@vibedev-si/dsh-vibedev@0.2.1`): pnpm does not install versions younger than a day by default.
 
 **Signing in**: choose "Sign in to VibeDev" at the bottom of the sidebar or in Settings → VibeDev account. The VibeDev sign-in page opens in your system browser: you type your password on VibeDev's own page, never in the plugin. Settings → VibeDev account shows the account, the balance and how many VibeDev models are listed, and lets you top up, see usage and sign out.
 
 **Models**: the list comes from the VibeDev gateway for your account, so nothing is listed before you sign in; models appear right after, without a restart. Using a VibeDev model while signed out, or after the sign-in has ended, asks you to sign in; a used-up balance says so with the top-up link. These messages are separate from the DeepSeek account's. An expired access token is renewed and the request sent again, without repeating any output.
 
+**Web search**: the plugin registers the web search provider `vibedev-gateway`, signed in with your VibeDev account. Registering does not select it: DeepSeek Harness keeps its own search unless the profile sets `searchProvider: vibedev-gateway` on the `web` row (the VibeDev app does). Searching is free, but the gateway refuses every request, searches included, while the balance is zero.
+
 **Media tools**: `image_generate`, `video_generate` (runs as a background job), `audio_generate` (music or a podcast), `audio_transcribe` (Mandarin only for now), `media_models`, `media_tasks` and `media_account`. Reference images, videos and audio, and first and last frames, can each be a workspace path, an http(s) link, or `chat:1` for the most recent matching file you attached. A request the model cannot serve is refused before anything is uploaded or charged.
 
 **Cost**: chat models are billed by usage at the gateway's prices; images per image, video per second (reference video length counts), music and podcasts per request. Failed video and audio tasks are not charged, and a submitted video cannot be cancelled. "Ask before each paid generation" is off by default.
 
-**Settings**: open "VibeDev Account & Models" on the Plugins page for the spending confirmation, the output folder and the default media models. `displayName`, `preferredModels`, `openBrowserOnSignIn` and `catalogRefreshMinutes` are set in the profile's `cordis.patch.yml` row `dsh-vibedev`.
+**Settings**: open "VibeDev Account & Models" on the Plugins page for the spending confirmation, the output folder and the default media models. `displayName`, `preferredModels`, `openBrowserOnSignIn`, `catalogRefreshMinutes`, `client` (the client name sent with the sign-in, default `vibedev-plugin`) and `primary` (show the account as the app's main account; off by default, on in the VibeDev app) are set in the profile's `cordis.patch.yml` row `dsh-vibedev`.
 
 **Upgrading from dsh-media**: the VibeDev Plugin Center (0.1.5 or later) switches it over for you, from its banner or when you install this plugin, the film workbench or the AI Creator Suite: the new package is installed disabled, `dsh-media` is disabled, the new one enabled, and `dsh-media` removed only after that worked. By hand, disable `dsh-media` first, install `@vibedev-si/dsh-vibedev`, uninstall `dsh-media` and restart the app fully. The two cannot both be enabled: they register the same tool names, and whichever loads second fails to start. The sign-in and running video and audio tasks carry over; the media settings go back to their defaults.
 
