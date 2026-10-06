@@ -67,6 +67,18 @@ export const zh = {
   sidebarIntro: '登录后可用 VibeDev 的模型和媒体生成',
   settings: '设置',
   accountMenu: 'VibeDev 账号菜单',
+  toolsTitle: '创作工具',
+  toolsIntro: '这个账号可以和影视工作台、媒体预览与画廊一起用，也能生成片子要做的一切；它们都列在插件中心，可以一并查看和升级。',
+  toolsQuiet: '装上或更新这些工具不会动你的登录、余额和进行中的任务。',
+  toolsMissingTitle: '再装上这两件，就能从头做片子',
+  toolsMissingIntro: '这个账号负责生成；下面这两件负责把生成的东西编排成片、看清楚。',
+  toolsMissingKeep: '补齐之后，登录、余额和进行中的任务都不受影响；升级插件也不会动工作区里的文件。',
+  'tools.film.missing': '影视工作台：剧本、分镜画布和导演台，Agent 还带 30 个影视工具。',
+  'tools.viewer.missing': '媒体预览与画廊：在右侧栏直接看视频、音频和 HTML，或按文件夹浏览媒体。',
+  toolsOpen: '在插件中心查看',
+  toolsManual: '也可以打开「插件 → 添加插件」，填入这个包名：',
+  toolsCopy: '复制包名',
+  toolsCopied: '已复制',
 } as const
 
 /** Keys of the dictionary. */
@@ -135,6 +147,18 @@ export const en: Record<MediaSettingsKey, string> = {
   sidebarIntro: 'Sign in to use the VibeDev models and media generation',
   settings: 'Settings',
   accountMenu: 'VibeDev account menu',
+  toolsTitle: 'Tools for creators',
+  toolsIntro: 'This account works with the film workbench and with Media Viewer, and it generates everything a film needs; all of them are listed in the plugin centre, where they can be reviewed and updated together.',
+  toolsQuiet: 'Installing or updating these tools leaves your sign-in, balance and running tasks alone.',
+  toolsMissingTitle: 'Two more tools turn this into film making end to end',
+  toolsMissingIntro: 'This account generates; the two below arrange what you generated into a film, and let you watch it closely.',
+  toolsMissingKeep: 'Adding them leaves your sign-in, balance and running tasks alone, and updating a plugin never touches the files in your workspace.',
+  'tools.film.missing': 'Film workbench: screenplay, storyboard canvas and director desk, with 30 film tools for the agent.',
+  'tools.viewer.missing': 'Media Viewer: play video, audio and HTML right in the sidebar, or browse a folder as a gallery.',
+  toolsOpen: 'Open the plugin centre',
+  toolsManual: 'You can also open Plugins → Add plugin and paste this package name:',
+  toolsCopy: 'Copy package name',
+  toolsCopied: 'Copied',
 }
 
 /**

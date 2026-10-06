@@ -27,9 +27,12 @@ import { AccountSection } from './AccountSection.tsx'
 import { AccountStore } from './account-store.ts'
 import { FIELDS, SETTINGS_NAMESPACE, fieldSpecs } from './fields.ts'
 import { en, zh } from './locales.ts'
+import type { MediaSettingsKey } from './locales.ts'
 import { MediaSettingsPage, type PageState, type Translate } from './SettingsPage.tsx'
 import { PrimaryLauncher, type LauncherOwner } from './PrimaryLauncher.tsx'
 import { SidebarAccount } from './SidebarAccount.tsx'
+import { SUITE, createSuiteStore } from './suite.ts'
+import type { SuiteWant } from './suite.ts'
 
 /** The package name the Plugins page keys a bundle's configuration by. */
 const PACKAGE_NAME = '@vibedev-si/dsh-vibedev'
@@ -43,6 +46,16 @@ const SECTION_ORDER = -5
 const PRIMARY_SECTION_ORDER = -20
 /** Below the default the DeepSeek account launcher registers with, so this row is the one the foot shows. */
 const LAUNCHER_PRIORITY = -1
+
+/**
+ * The creator tools that work with this account, offered under the account's own settings.
+ * The account itself is never listed: it is what the person is already looking at (and the
+ * VibeDev app ships with it built in), so only what is missing from the Host is named.
+ */
+export const CREATOR_WANTED: readonly SuiteWant<MediaSettingsKey>[] = [
+  { package: SUITE.film, key: 'tools.film.missing' },
+  { package: SUITE.viewer, key: 'tools.viewer.missing' },
+]
 
 interface LocaleService {
   register(namespace: string, dictionaries: { zh: Record<string, string>; en: Record<string, string> }): unknown
@@ -101,6 +114,9 @@ export function apply(ctx: ClientContext): void {
 
   const account = new AccountStore(windowOptions())
   ctx.effect(() => account.start(), 'dsh-vibedev: account reads')
+  // One read of which creator tools this Host has, refreshed on every plugin change.
+  const creatorTools = createSuiteStore(ctx, CREATOR_WANTED, t)
+  ctx.effect(() => creatorTools.start(), 'dsh-vibedev: creator tools presence')
 
   const section = (order: number) => disposer(ctx.slots.inject('settings.section', () => ctx.slots.register({
     name: 'settings.section',
@@ -108,7 +124,7 @@ export function apply(ctx: ClientContext): void {
     order,
     label: () => t('accountNav'),
     locale: LOCALE_NAMESPACE,
-  }, () => h(AccountSection, { t, store: account, routeName: ROUTE_NAME }))))
+  }, () => h(AccountSection, { t, store: account, routeName: ROUTE_NAME, suite: creatorTools }))))
   // The main account: the row at the very foot of the sidebar, in place of the Harness's account launcher.
   const launcher = () => disposer(ctx.slots.inject('settings.launcher', () => ctx.slots.register({
     name: 'settings.launcher',
