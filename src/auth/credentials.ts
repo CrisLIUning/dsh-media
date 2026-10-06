@@ -7,7 +7,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { CredentialProvider } from '@deepseek-ai/dsh-credentials'
 import { credentialKey } from '@deepseek-ai/dsh-credentials'
@@ -59,7 +59,7 @@ export class CredentialChain {
 }
 
 // Named after the plugin's former name, dsh-media: keeping the key lets an upgrade keep the sign-in.
-const GRANT_KEY = credentialKey('dsh-media', 'vibedev-session')
+export const GRANT_KEY = credentialKey('dsh-media', 'vibedev-session')
 
 function isGrant(value: unknown): value is PluginGrant {
   const grant = value as PluginGrant | undefined
@@ -80,26 +80,68 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
   const deviceFile = join(stateDir, 'device.json')
   let device: Promise<string> | undefined
   const readFileGrant = async (): Promise<PluginGrant | undefined> => {
-    const parsed: unknown = await readFile(sessionFile, 'utf8').then(text => JSON.parse(text) as unknown, () => undefined)
+    let text: string
+    try { text = await readFile(sessionFile, 'utf8') } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
+    const parsed: unknown = JSON.parse(text) as unknown
     return isGrant(parsed) ? parsed : undefined
   }
   // Owner-only from creation: the temporary file is written with this mode before the rename.
   const writeFileGrant = (grant: PluginGrant | undefined) =>
     writeFileAtomic(sessionFile, new TextEncoder().encode(grant === undefined ? 'null' : JSON.stringify(grant)), { mode: 0o600 })
+  const clearFileGrant = async (): Promise<void> => {
+    try { await stat(sessionFile) } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw error
+    }
+    // Remove the secret while keeping an owner-only atomic tombstone; do not leave a stale session to revive.
+    await writeFileGrant(undefined)
+  }
+  const clearFileGrantQuietly = async (): Promise<void> => {
+    try { await clearFileGrant() } catch { /* A valid host record remains authoritative; retry cleanup on the next read. */ }
+  }
+  const readHostGrant = async (store: CredentialProvider): Promise<PluginGrant | undefined> => {
+    const stored = await store.readRecord(GRANT_KEY)
+    if (stored !== undefined) {
+      const grant = stored.kind === 'grant' && isGrant(stored.payload) ? stored.payload : undefined
+      if (grant !== undefined) await clearFileGrantQuietly()
+      return grant
+    }
+    // A missing/empty tombstone needs no writer lock. Never take a grant snapshot before the host lock.
+    try { if ((await stat(sessionFile)).size <= 4) return undefined } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+      throw error
+    }
+    let adopted: PluginGrant | undefined
+    await store.modifyRecord(GRANT_KEY, async (current) => {
+      if (current !== undefined) {
+        adopted = current.kind === 'grant' && isGrant(current.payload) ? current.payload : undefined
+        return undefined
+      }
+      // A concurrent sign-out may have cleared the fallback while this mutation waited for the lock.
+      adopted = await readFileGrant()
+      return adopted === undefined ? undefined : { kind: 'grant', payload: adopted }
+    })
+    if (adopted !== undefined) await clearFileGrantQuietly()
+    return adopted
+  }
   return {
     async read() {
       const store = credentials()
-      if (store !== undefined) {
-        const stored = await store.readRecord(GRANT_KEY)
-        return stored?.kind === 'grant' && isGrant(stored.payload) ? stored.payload : undefined
-      }
-      return readFileGrant()
+      return store === undefined ? readFileGrant() : readHostGrant(store)
     },
     async write(grant) {
       const store = credentials()
       if (store !== undefined) {
-        if (grant === undefined) await store.deleteRecord(GRANT_KEY)
-        else await store.modifyRecord(GRANT_KEY, () => Promise.resolve({ kind: 'grant', payload: grant }))
+        if (grant === undefined) {
+          await clearFileGrant()
+          await store.deleteRecord(GRANT_KEY)
+        } else {
+          await store.modifyRecord(GRANT_KEY, () => Promise.resolve({ kind: 'grant', payload: grant }))
+          await clearFileGrantQuietly()
+        }
         return
       }
       await writeFileGrant(grant)
@@ -107,6 +149,7 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
     async update(change: (current: PluginGrant | undefined) => Promise<GrantChange>) {
       const store = credentials()
       if (store !== undefined) {
+        await readHostGrant(store)
         // The credential store serializes this read-modify-write across processes.
         let remove = false
         await store.modifyRecord(GRANT_KEY, async (current) => {
@@ -115,7 +158,7 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
           remove = result.kind === 'delete'
           return undefined
         })
-        if (remove) await store.deleteRecord(GRANT_KEY)
+        if (remove) { await clearFileGrant(); await store.deleteRecord(GRANT_KEY) }
         return
       }
       // The file fallback has no cross-process lock; reading right before the change narrows the window.

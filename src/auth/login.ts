@@ -146,7 +146,9 @@ const PAGE = (title: string, body: string) => `<!doctype html><html><head><meta 
 /** The plugin's VibeDev session. */
 export class PluginLogin {
   private grant: PluginGrant | undefined
-  private loaded: Promise<void> | undefined
+  private reading: Promise<void> | undefined
+  private revision = 0
+  private readFailureReported = false
   private refreshing: Promise<PluginGrant | undefined> | undefined
   private pending: (PendingSignIn & { server: Server; cancel: (reason: Error) => void }) | undefined
   private readonly listeners = new Set<() => void>()
@@ -161,13 +163,37 @@ export class PluginLogin {
     this.origin = options.origin.trim().replace(/\/+$/, '')
   }
 
+  private readStored(notify: boolean): Promise<void> {
+    if (this.reading !== undefined) return this.reading
+    const revision = this.revision
+    this.reading = this.options.storage.read().then((grant) => {
+      this.readFailureReported = false
+      // A sign-in/sign-out may have committed while this read was waiting for storage.
+      if (this.revision !== revision) return
+      if (notify) this.adopt(grant)
+      else { this.grant = grant; this.revision++ }
+    }, () => {
+      if (!this.readFailureReported) this.options.log?.('dsh-vibedev: stored sign-in is temporarily unreadable; it will be checked again')
+      this.readFailureReported = true
+    }).finally(() => { this.reading = undefined })
+    return this.reading
+  }
+
   private load(): Promise<void> {
-    this.loaded ??= this.options.storage.read().then((grant) => { this.grant = grant }, () => undefined)
-    return this.loaded
+    // Cache a usable grant, never an early absence or a failed read.
+    return this.grant === undefined ? this.readStored(false) : Promise.resolve()
+  }
+
+  /** Re-read after the credential provider becomes ready or its record changes, without starting a browser sign-in. */
+  async restore(): Promise<void> {
+    // A read started against the file fallback must finish before reading the newly available provider.
+    await this.reading
+    await this.readStored(true)
   }
 
   /** Take a grant as current and tell listeners when it changed. */
   private adopt(grant: PluginGrant | undefined): void {
+    this.revision++
     const changed = this.grant?.accessToken !== grant?.accessToken
     this.grant = grant
     if (!changed) return

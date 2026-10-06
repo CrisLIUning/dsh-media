@@ -36,7 +36,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-web'
 import Schema from '@deepseek-ai/schemastery'
 import { AccountService, accountRoutes } from './account/index.js'
-import { CredentialChain, grantStorage } from './auth/credentials.js'
+import { CredentialChain, GRANT_KEY, grantStorage } from './auth/credentials.js'
 import { PluginLogin, openInBrowser } from './auth/login.js'
 import { installGatewayModels } from './llm/index.js'
 import type { GatewayModels } from './llm/index.js'
@@ -179,6 +179,12 @@ export function apply(ctx: Context, config: Config): void {
   const login = new PluginLogin({
     origin, userAgent, log: warn, storage, client: config.client.trim() || 'vibedev-plugin',
     openBrowser: url => config.openBrowserOnSignIn ? openInBrowser(url) : Promise.resolve(false),
+  })
+  // Service availability, not row order, determines when persisted records can be read.
+  // Keep hosts without a credential provider supported, and restore when one arrives/reloads.
+  ctx.inject(['credentials'], (scoped) => {
+    scoped.on('credentials/record-updated', (key) => { if (key === GRANT_KEY) void login.restore() })
+    scoped.effect(async () => { await login.restore(); return () => {} }, 'dsh-vibedev: restore stored sign-in')
   })
   const chain = new CredentialChain({
     origin, plugin: login,
