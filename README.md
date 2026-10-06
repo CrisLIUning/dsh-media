@@ -29,7 +29,7 @@
 
 - **VibeDev 应用**：已内置本插件，不用另装。VibeDev 账号就是应用的主账号：侧边栏最底下一行和设置里的第一项都是它，DeepSeek 账号作为第二个账号显示在它上方。
 
-新版本在 npm 上发布后的 24 小时内，只写包名可能装到上一个版本（pnpm 默认不装发布未满一天的版本），想马上用新版就写明版本号，例如 `@vibedev-si/dsh-vibedev@0.2.4`。
+新版本在 npm 上发布后的 24 小时内，只写包名可能装到上一个版本（pnpm 默认不装发布未满一天的版本），想马上用新版就写明版本号，例如 `@vibedev-si/dsh-vibedev@0.2.5`。
 
 ## 登录 VibeDev
 
@@ -39,7 +39,7 @@
 
 0.2.3 起修复了重启后再次要求登录的问题：启动时凭据服务未就绪或临时读取失败，会在服务就绪后恢复，不把空结果永久缓存；正常关闭应用保留登录。过去写到本地备用文件的会话在宿主凭据服务可用后迁入，宿主已有记录优先，显式退出会清理备用会话。VibeDev 应用内置的插件需要随应用升级到修复版；单独安装在 DeepSeek Harness 中的插件可直接升级。
 
-0.2.4 起在「设置 → VibeDev 账号」页尾加了「创作工具」一行：缺影视工作台或媒体预览时说明用途，都能用了就只留一个进入 VibeDev 插件中心的入口。是否显示按宿主真实的安装状态判断，已装或应用内置的组件不会再推荐安装；这里不会自动安装任何东西，装上、升级都由插件中心或插件页在你自己点击后完成。升级插件不影响已保存的剧本、分镜和作品文件，也不影响现有登录。
+0.2.5 起撤回了 0.2.4 加在「设置 → VibeDev 账号」页尾的「创作工具」推荐行：那一行属于插件之间的推荐位，放在设置页会影响观感，等重新设计后再考虑。撤销只涉及这一处界面，账号、余额、模型列表、登录与已保存的剧本分镜作品都不受影响。
 
 ## VibeDev 的模型
 
@@ -132,13 +132,13 @@ Sign in to VibeDev in DeepSeek Harness, next to the DeepSeek account:
 
 Everything is paid from your VibeDev balance; the DeepSeek account stays DeepSeek Harness's own, and the two do not affect each other. To create an account, register at [vibedev.jzsaas.com](https://vibedev.jzsaas.com). This plugin was renamed from `dsh-media`.
 
-**Install**: install `@vibedev-si/dsh-vibedev` by package name on the Plugins page (the `@vibedev-si/` scope is required), or from the [VibeDev Plugin Center](https://github.com/VibeDev-Si/dsh-ecosystem); from the command line, `dsh plugin add @vibedev-si/dsh-vibedev`, or `dsh plugin --profile desktop add @vibedev-si/dsh-vibedev` for the desktop app (quit it fully first). The VibeDev app ships with the plugin built in, and there the VibeDev account is the main account (the bottom row of the sidebar and the first Settings section), with the DeepSeek account as the second one. Within 24 hours of a release, name the version (e.g. `@vibedev-si/dsh-vibedev@0.2.4`): pnpm does not install versions younger than a day by default.
+**Install**: install `@vibedev-si/dsh-vibedev` by package name on the Plugins page (the `@vibedev-si/` scope is required), or from the [VibeDev Plugin Center](https://github.com/VibeDev-Si/dsh-ecosystem); from the command line, `dsh plugin add @vibedev-si/dsh-vibedev`, or `dsh plugin --profile desktop add @vibedev-si/dsh-vibedev` for the desktop app (quit it fully first). The VibeDev app ships with the plugin built in, and there the VibeDev account is the main account (the bottom row of the sidebar and the first Settings section), with the DeepSeek account as the second one. Within 24 hours of a release, name the version (e.g. `@vibedev-si/dsh-vibedev@0.2.5`): pnpm does not install versions younger than a day by default.
 
 **Signing in**: choose "Sign in to VibeDev" at the bottom of the sidebar or in Settings → VibeDev account. The VibeDev sign-in page opens in your system browser: you type your password on VibeDev's own page, never in the plugin. Settings → VibeDev account shows the account, the balance and how many VibeDev models are listed, and lets you top up, see usage and sign out.
 
 **Sign-in persistence (0.2.3)**: an early empty or failed startup read is retried when storage becomes ready, and committed credential changes restore the account and model route. A late read cannot overwrite a newly saved sign-in. Normal app exit keeps the sign-in. A session saved in the local fallback is migrated into an available host store without overwriting an existing host record; signing out clears the fallback as well. A built-in copy is upgraded by updating VibeDev, while a separately installed plugin can be upgraded directly.
 
-**Creator tools (0.2.4)**: Settings → VibeDev account ends with a Creator tools line that names the film workbench or the media viewer while one is missing, and otherwise offers the VibeDev plugin centre alone. What appears follows the Host's real inventory, so an installed or app-provided component is never offered again; nothing is installed automatically. Upgrading changes neither saved screenplays, boards and film files nor the existing sign-in.
+**Creator tools withdrawn (0.2.5)**: the Creator tools line 0.2.4 added at the end of Settings → VibeDev account is gone. It was a cross-plugin recommendation slot, and in the settings page it hurt the layout; a redesign can revisit it later. Only that interface change is reverted: the account, the balance, the model list, the sign-in and saved screenplays, boards and film files are untouched.
 
 **Models**: the list comes from the VibeDev gateway for your account, so nothing is listed before you sign in; models appear right after, without a restart. Using a VibeDev model while signed out, or after the sign-in has ended, asks you to sign in; a used-up balance says so with the top-up link. These messages are separate from the DeepSeek account's. An expired access token is renewed and the request sent again, without repeating any output.
 

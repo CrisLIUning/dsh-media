@@ -1,6 +1,6 @@
 {
   "name": "@vibedev-si/dsh-vibedev",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "VibeDev 账号与模型：在 DeepSeek Harness 里登录 VibeDev，与 DeepSeek 账号并存，使用 VibeDev 网关的模型（Claude、GPT 等），并生成图片、视频、音乐和播客 · VibeDev account and models for DeepSeek Harness: sign in to VibeDev next to the DeepSeek account and use the VibeDev gateway's models (Claude, GPT and more), plus image, video, music and podcast generation",
   "type": "module",
   "main": "lib/index.js",
