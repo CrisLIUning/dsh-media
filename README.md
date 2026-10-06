@@ -150,6 +150,12 @@ Everything is paid from your VibeDev balance; the DeepSeek account stays DeepSee
 
 **Third-party code**: the model route in `src/llm/` is ported from the VibeDev app; `context.ts`, `replay.ts` and `stream.ts` are copied from DeepSeek Harness's `@deepseek-ai/dsh-llm-pi-ai` (MIT). The licences of the bundled pi-ai, Anthropic SDK, OpenAI SDK and their dependencies are in `THIRD-PARTY-NOTICES.txt`.
 
+## Maintainer releases
+
+Build, typecheck and test locally, pack the tested archive, tag the matching source version, and publish a GitHub Release with `vibedev-si-dsh-vibedev-<version>.tgz` attached. `.github/workflows/publish.yml` publishes that exact archive with npm OIDC; it does not rebuild the package. The job checks the source/tag/archive identities and Release asset digest, refuses an existing version with different bytes, and skips an identical already-published version. It verifies the complete npm tarball after publication. For a manual retry of an unpublished version, run the workflow on the version's tag ref.
+
+Configure npm Trusted Publisher with GitHub owner `VibeDev-Si`, repository `dsh-vibedev`, workflow `publish.yml`, no environment, and **Allow npm publish**. Enable **Allow npm dist-tag** as well to use the manual `dist-tag` operation for `latest` or `next`. No npm token is stored in this repository. Trusted publishing does not authorize `npm deprecate`; that maintenance operation still uses interactive authentication.
+
 ## License
 
 MIT
