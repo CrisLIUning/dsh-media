@@ -180,6 +180,47 @@ describe('TaskTracker', () => {
     expect(seen).toHaveLength(2)
   })
 
+  it('retries under the same key when the gateway asks for retry_same_key', async () => {
+    const { fetch, seen } = fakeFetch(
+      json(503, { error: { message: 'provider call dropped', submission_state: 'unknown', retry_action: 'retry_same_key' } }),
+      json(200, { id: 'vid_24', status: 'queued' }),
+      completed('vid_24'),
+      new Response(MP4),
+    )
+    const { tracker } = setup(fetch)
+    expect(await tracker.submit(draft('video', { id: 'v24' }))).toMatchObject({ status: 'pending', gatewayId: 'vid_24' })
+    expect((await tracker.follow('v24')).status).toBe('completed')
+    expect(seen.filter(request => request.method === 'POST').map(request => request.headers['idempotency-key'])).toEqual(['v24', 'v24'])
+  })
+
+  it('stops on retry_action none even when the same answer calls the outcome unknown', async () => {
+    const answer = json(502, { error: { code: 'UPSTREAM_REJECTED', message: 'the provider refused it', submission_state: 'unknown', retry_action: 'none', retryable: true } })
+    const { fetch, seen } = fakeFetch(answer, answer, answer)
+    const { tracker, store } = setup(fetch)
+    await expect(tracker.submit(draft('video', { id: 'v25' }))).rejects.toMatchObject({ code: 'UPSTREAM_REJECTED' })
+    expect(seen).toHaveLength(1)
+    expect(await store.list()).toEqual([])
+  })
+
+  it('stops at VIDEO_SUBMISSION_AMBIGUOUS before the reconcile wording, and does not send the person to regenerate', async () => {
+    const down = () => { throw new TypeError('fetch failed') }
+    // The gateway also asks for a reconciliation: the stop still wins, and nothing after it is sent.
+    const ambiguous = json(409, { error: { code: 'VIDEO_SUBMISSION_AMBIGUOUS', message: 'ambiguous', submission_state: 'unknown', retry_action: 'reconcile' } })
+    const { fetch, seen } = fakeFetch(down, ambiguous, ambiguous, ambiguous)
+    const { tracker } = setup(fetch)
+    const error = await tracker.submit(draft('video', { id: 'v26' })).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'VIDEO_SUBMISSION_AMBIGUOUS' })
+    expect((error as Error).message).not.toMatch(/submit (it|the request) again/i)
+    expect((error as Error).message).toContain('Check the task list')
+    expect(seen).toHaveLength(2)
+    const record = await tracker.follow('v26')
+    expect(record).toMatchObject({ status: 'failed', error: { code: 'VIDEO_SUBMISSION_AMBIGUOUS' } })
+    expect(record.error?.message).not.toMatch(/submit (it|the request) again/i)
+    await tracker.resume()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(seen).toHaveLength(2)
+  })
+
   it('keeps following a task it failed to record after the gateway accepted it', async () => {
     class FlakyStore extends TaskStore {
       failures = 1

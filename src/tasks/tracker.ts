@@ -122,29 +122,37 @@ export type SubmissionRecovery = 'rejected' | 'reconcile' | 'wait'
 /** Structured verdicts the gateway sends; an unknown word falls back to the older protocol. */
 const REJECTED_STATES = new Set(['rejected', 'refused', 'denied'])
 const RECONCILE_STATES = new Set(['unknown', 'accepted'])
+/** `retry_action` values that keep the same key: a lookup of this submission, never a new one. */
+const SAME_KEY_ACTIONS = new Set(['reconcile', 'retry_same_key', 'retry_same'])
 
 /**
- * What a failed submission means, from the gateway's structured verdict first
- * and only from the HTTP status when it sends none. `retryable` says recovery
- * is still needed; it never authorizes creating another task (`retry_action`
- * says what to do, and `none` means stop).
+ * What a failed submission means.
+ *
+ * The two STOP rules are read before anything that would keep the operation
+ * alive, so no verdict can talk the plugin into sending a refused request
+ * again: `retry_action: none` (the provider refused it) and
+ * `VIDEO_SUBMISSION_AMBIGUOUS` (the gateway's key answers this forever) end the
+ * operation even when the same answer also says the outcome is unknown.
+ *
+ * After those, the gateway's structured verdict decides, and only when it
+ * sends none do the HTTP status and the older codes. `retryable` says recovery
+ * is still needed; it never authorizes creating another task.
  * @param error - the failure.
  * @returns how it may be taken further.
  */
 export function submissionRecovery(error: unknown): SubmissionRecovery {
   if (!(error instanceof MediaError)) return 'rejected'
   const { submissionState, retryAction, status, busy, retryable } = error.details
-  if (submissionState !== undefined) {
-    if (REJECTED_STATES.has(submissionState)) return 'rejected'
-    if (RECONCILE_STATES.has(submissionState)) return 'reconcile'
-  }
-  if (retryAction !== undefined) {
-    if (retryAction === 'none') return 'rejected'
-    if (retryAction === 'reconcile') return 'reconcile'
-    if (retryAction === 'retry') return 'wait'
-  }
-  if (NO_ANSWER_CODES.has(error.code)) return 'reconcile'
+  // Stop first: nothing below may turn either of these into another attempt.
+  if (retryAction === 'none') return 'rejected'
   if (error.code === SUBMISSION_AMBIGUOUS || KEY_CONFLICT.test(error.code)) return 'rejected'
+  if (submissionState !== undefined && REJECTED_STATES.has(submissionState)) return 'rejected'
+  // Same key, same body: `retry_same_key` sends that one submission again (the gateway answers with the
+  // task it already has, or creates it once) and `reconcile` settles what became of it.
+  if (retryAction !== undefined && SAME_KEY_ACTIONS.has(retryAction)) return 'reconcile'
+  if (retryAction === 'retry') return 'wait'
+  if (submissionState !== undefined && RECONCILE_STATES.has(submissionState)) return 'reconcile'
+  if (NO_ANSWER_CODES.has(error.code)) return 'reconcile'
   if (busy === true) return 'wait'
   if (status !== undefined && status >= 400 && status < 500) return status === 409 ? 'reconcile' : 'rejected'
   // A 5xx that says it will not succeed on a retry is final; an unreadable one leaves the outcome open.
@@ -154,6 +162,10 @@ export function submissionRecovery(error: unknown): SubmissionRecovery {
 
 /**
  * The failure to record when a submission is refused for good.
+ *
+ * None of these tells the person to generate again: in the two cases where the
+ * provider may already hold the request, a new generation would be a second
+ * paid task, so the wording asks them to check the records first.
  * @param error - the failure.
  * @returns the code and message to keep with the task.
  */
@@ -162,12 +174,13 @@ function terminalFailure(error: unknown): { code: string; message: string } {
   if (error.code === SUBMISSION_AMBIGUOUS) {
     return {
       code: error.code,
-      message: 'The gateway could not confirm the submission with the provider, so it created no task and charged nothing. '
-        + 'Submit the request again if it is still wanted.',
+      message: 'The gateway could not confirm this submission with the provider, so it created no task and charged nothing, '
+        + 'and this request key will answer the same way. If the provider did receive it, that task is not visible here. '
+        + 'Check the task list and the account usage before generating the same thing again.',
     }
   }
   if (KEY_CONFLICT.test(error.code)) {
-    return { code: error.code, message: 'The gateway refused the request: its key was already used for a different request. Nothing was charged; submit it again.' }
+    return { code: error.code, message: 'The gateway refused the request: its key was already used for a different request. Nothing was charged. Check the task list for the earlier request before generating again.' }
   }
   return { code: error.code, message: error.message }
 }
