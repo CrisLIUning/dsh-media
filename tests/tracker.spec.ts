@@ -17,14 +17,14 @@ beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'dsh-media-tracker-'
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 
 /** A tracker on a fake gateway whose `sleep` advances the clock instead of waiting. */
-function setup(fetch: typeof globalThis.fetch, options: { store?: TaskStore; downloadAttempts?: number } = {}) {
+function setup(fetch: typeof globalThis.fetch, options: { store?: TaskStore; downloadAttempts?: number; onWait?: (ms: number) => void } = {}) {
   const clock = { now: Date.parse('2026-10-03T09:00:00Z') }
   const now = () => clock.now
   const http = new GatewayHttp({ origin: ORIGIN, userAgent: 'vibedev-plugin/test', fetch, resolveCredential: async () => ({ token: 'tok', kind: 'account' }), sleep: async () => {} })
   const store = options.store ?? new TaskStore(join(dir, 'state'), now)
   const waits: number[] = []
   const tracker = new TaskTracker({
-    http, store, now, sleep: async (ms) => { waits.push(ms); clock.now += ms },
+    http, store, now, sleep: async (ms) => { waits.push(ms); options.onWait?.(ms); clock.now += ms },
     ...options.downloadAttempts === undefined ? {} : { downloadAttempts: options.downloadAttempts },
   })
   return { http, store, tracker, waits, clock }
@@ -180,6 +180,47 @@ describe('TaskTracker', () => {
     expect(seen).toHaveLength(2)
   })
 
+  it('retries under the same key when the gateway asks for retry_same_key', async () => {
+    const { fetch, seen } = fakeFetch(
+      json(503, { error: { message: 'provider call dropped', submission_state: 'unknown', retry_action: 'retry_same_key' } }),
+      json(200, { id: 'vid_24', status: 'queued' }),
+      completed('vid_24'),
+      new Response(MP4),
+    )
+    const { tracker } = setup(fetch)
+    expect(await tracker.submit(draft('video', { id: 'v24' }))).toMatchObject({ status: 'pending', gatewayId: 'vid_24' })
+    expect((await tracker.follow('v24')).status).toBe('completed')
+    expect(seen.filter(request => request.method === 'POST').map(request => request.headers['idempotency-key'])).toEqual(['v24', 'v24'])
+  })
+
+  it('stops on retry_action none even when the same answer calls the outcome unknown', async () => {
+    const answer = json(502, { error: { code: 'UPSTREAM_REJECTED', message: 'the provider refused it', submission_state: 'unknown', retry_action: 'none', retryable: true } })
+    const { fetch, seen } = fakeFetch(answer, answer, answer)
+    const { tracker, store } = setup(fetch)
+    await expect(tracker.submit(draft('video', { id: 'v25' }))).rejects.toMatchObject({ code: 'UPSTREAM_REJECTED' })
+    expect(seen).toHaveLength(1)
+    expect(await store.list()).toEqual([])
+  })
+
+  it('stops at VIDEO_SUBMISSION_AMBIGUOUS before the reconcile wording, and does not send the person to regenerate', async () => {
+    const down = () => { throw new TypeError('fetch failed') }
+    // The gateway also asks for a reconciliation: the stop still wins, and nothing after it is sent.
+    const ambiguous = json(409, { error: { code: 'VIDEO_SUBMISSION_AMBIGUOUS', message: 'ambiguous', submission_state: 'unknown', retry_action: 'reconcile' } })
+    const { fetch, seen } = fakeFetch(down, ambiguous, ambiguous, ambiguous)
+    const { tracker } = setup(fetch)
+    const error = await tracker.submit(draft('video', { id: 'v26' })).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'VIDEO_SUBMISSION_AMBIGUOUS' })
+    expect((error as Error).message).not.toMatch(/submit (it|the request) again/i)
+    expect((error as Error).message).toContain('Check the task list')
+    expect(seen).toHaveLength(2)
+    const record = await tracker.follow('v26')
+    expect(record).toMatchObject({ status: 'failed', error: { code: 'VIDEO_SUBMISSION_AMBIGUOUS' } })
+    expect(record.error?.message).not.toMatch(/submit (it|the request) again/i)
+    await tracker.resume()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(seen).toHaveLength(2)
+  })
+
   it('keeps following a task it failed to record after the gateway accepted it', async () => {
     class FlakyStore extends TaskStore {
       failures = 1
@@ -253,15 +294,105 @@ describe('TaskTracker', () => {
     expect(bystander.seen).toEqual([])
   })
 
-  it('retries a resend refused outright only briefly after an unanswered attempt', async () => {
+  it('ends a refused resend after an unanswered attempt with the gateway reason, and stops sending it', async () => {
     const down = () => { throw new TypeError('fetch failed') }
     const refused = () => json(402, { error: { code: 'INSUFFICIENT_BALANCE', message: 'estimated ¥2.40, available ¥1.10', stage: 'admission' } })
     const { fetch, seen } = fakeFetch(down, refused, ...Array.from({ length: 12 }, () => refused))
     const { tracker, store } = setup(fetch)
-    await expect(tracker.submit(draft('video', { id: 'v15' }))).rejects.toMatchObject({ code: 'SUBMISSION_UNCONFIRMED' })
+    // The refusal is the caller's answer now: no waiting for a grace that used to resend a refused request.
+    await expect(tracker.submit(draft('video', { id: 'v15' }))).rejects.toMatchObject({ code: 'INSUFFICIENT_BALANCE' })
     expect(await tracker.follow('v15')).toMatchObject({ status: 'failed', error: { code: 'INSUFFICIENT_BALANCE' } })
     expect((await store.get('v15'))?.status).toBe('failed')
-    expect(seen.length).toBeLessThan(12)
+    expect(seen).toHaveLength(2)
+  })
+
+  it('treats a structured rejection as final: one submission, no resend in the background', async () => {
+    const rejected = json(502, {
+      error: {
+        code: 'PROVIDER_REQUEST_REJECTED', message: 'reference audio duration must be between 1 and 15 seconds',
+        submission_state: 'rejected', retry_action: 'none', retryable: true,
+      },
+    })
+    const { fetch, seen } = fakeFetch(rejected, rejected, rejected, rejected)
+    const { tracker, store } = setup(fetch)
+    // retryable: true says recovery is still needed; retry_action: none is what forbids creating anything again.
+    const error = await tracker.submit(draft('video', { id: 'v17' })).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'PROVIDER_REQUEST_REJECTED' })
+    expect((error as Error).message).toContain('reference audio duration')
+    expect(seen).toHaveLength(1)
+    await tracker.resume()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(seen).toHaveLength(1)
+    expect(await store.list()).toEqual([])
+  })
+
+  it('saves a rejection the background met after an unanswered attempt, and never resends it', async () => {
+    const down = () => { throw new TypeError('fetch failed') }
+    const rejected = json(502, { error: { code: 'PROVIDER_REQUEST_REJECTED', message: 'reference audio is 27.07 s; at most 15 s', submission_state: 'rejected', retry_action: 'none' } })
+    const { fetch, seen } = fakeFetch(down, rejected, rejected, rejected)
+    const { tracker, store } = setup(fetch)
+    await expect(tracker.submit(draft('video', { id: 'v18' }))).rejects.toMatchObject({ code: 'PROVIDER_REQUEST_REJECTED' })
+    const record = await tracker.follow('v18')
+    expect(record).toMatchObject({ status: 'failed', error: { code: 'PROVIDER_REQUEST_REJECTED' } })
+    expect(record.error?.message).toContain('27.07 s')
+    expect(seen).toHaveLength(2)
+    // A restart resumes only what is unfinished; a rejected submission is never sent again.
+    await tracker.resume()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(seen).toHaveLength(2)
+    expect((await store.get('v18'))?.status).toBe('failed')
+  })
+
+  it('reconciles an unknown submission under the same key and never mints another', async () => {
+    const { fetch, seen } = fakeFetch(
+      json(502, { error: { message: 'bad gateway', submission_state: 'unknown', retry_action: 'reconcile', retryable: true } }),
+      json(200, { id: 'vid_19', status: 'queued' }),
+      completed('vid_19'),
+      new Response(MP4),
+    )
+    const { tracker } = setup(fetch)
+    expect(await tracker.submit(draft('video', { id: 'v19' }))).toMatchObject({ status: 'pending', gatewayId: 'vid_19' })
+    expect((await tracker.follow('v19')).status).toBe('completed')
+    expect(new Set(seen.filter(request => request.method === 'POST').map(request => request.headers['idempotency-key']))).toEqual(new Set(['v19']))
+  })
+
+  it('only polls a task it already has, and a failed poll submits nothing', async () => {
+    const { fetch, seen } = fakeFetch(
+      json(500, { error: { message: 'gateway hiccup' } }),
+      json(500, { error: { message: 'gateway hiccup' } }),
+      completed('vid_20'),
+      new Response(MP4),
+    )
+    const { tracker, store } = setup(fetch)
+    await store.add(draft('video', { id: 'v20', status: 'pending', gatewayId: 'vid_20' }))
+    expect((await tracker.follow('v20')).status).toBe('completed')
+    expect(seen.filter(request => request.method === 'POST')).toEqual([])
+    expect(seen.every(request => request.headers['idempotency-key'] === undefined)).toBe(true)
+    expect(await store.get('v20')).toMatchObject({ status: 'completed', gatewayId: 'vid_20' })
+  })
+
+  it('stops on the person\'s cancel: no further submission, and nothing resumes it', async () => {
+    const down = () => { throw new TypeError('fetch failed') }
+    const { fetch, seen } = fakeFetch(down, down, down, down)
+    const controller = new AbortController()
+    // The cancel lands while the tracker is settling the unanswered attempt.
+    const { tracker, store } = setup(fetch, { onWait: () => controller.abort() })
+    const error = await tracker.submit(draft('video', { id: 'v23' }), controller.signal).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'ABORTED' })
+    expect((await store.get('v23'))?.status).toBe('lost')
+    const sent = seen.length
+    await tracker.resume()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(seen).toHaveLength(sent)
+  })
+
+  it('gives each user-asked request its own key, and an accepted submission only its own', async () => {
+    // Each answer completes on the spot, so no follow-up poll interleaves with the two submissions.
+    const { fetch, seen } = fakeFetch(completed('vid_21'), new Response(MP4), completed('vid_22'), new Response(MP4))
+    const { tracker } = setup(fetch)
+    await tracker.submit(draft('video', { id: 'v21' }))
+    await tracker.submit(draft('video', { id: 'v22' }))
+    expect(seen.filter(request => request.method === 'POST').map(request => request.headers['idempotency-key'])).toEqual(['v21', 'v22'])
   })
 
   it('resumes unfinished tasks after a restart and gives up on stale ones', async () => {

@@ -140,7 +140,11 @@ export async function prepareVideoTask(
   const videos = loaded.flatMap((item, index) => item.input === 'referenceVideos'
     ? [{ source: item.media.source, mime: item.media.mime, bytes: item.media.data.byteLength, ...assets[index]?.durationMs === undefined ? {} : { durationMs: assets[index]?.durationMs as number } }]
     : [])
-  checkReferenceDurations(model, videos)
+  const audios = loaded.flatMap((item, index) => item.input === 'referenceAudios'
+    ? [{ source: item.media.source, mime: item.media.mime, bytes: item.media.data.byteLength, ...assets[index]?.durationMs === undefined ? {} : { durationMs: assets[index]?.durationMs as number } }]
+    : [])
+  // Each reference is checked on its own measured length, audio included; the requested output duration is not its length.
+  checkReferenceDurations(model, videos, audios)
   const urls: Partial<Record<VideoInput, string[]>> = {}
   for (const [index, item] of loaded.entries()) {
     const asset = assets[index] as UploadedAsset

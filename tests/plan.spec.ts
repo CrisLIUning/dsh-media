@@ -110,6 +110,21 @@ describe('reference checks', () => {
     ])).message).toContain('15.12 s')
     expect(refusal(() => checkReferenceDurations(seedance, [{ source: 'a.mp4', mime: 'video/mp4', bytes: 1 }])).code).toBe('REFERENCE_DURATION_UNKNOWN')
   })
+
+  it('checks a reference audio on its own measured length, against the range that model declares', () => {
+    const audio = (durationMs?: number) => ({ source: 'm.wav', mime: 'audio/wav', bytes: 1, ...durationMs === undefined ? {} : { durationMs } })
+    // The lane that declares 1–15 s refuses a 27.07 s reference, measured — not the 5 s output wanted.
+    const strict = model('lec-ty-wan-3-0-1050-480p')
+    expect(refusal(() => checkReferenceDurations(strict, [], [audio(27_072)])).code).toBe('REFERENCE_AUDIO_TOO_LONG')
+    expect(refusal(() => checkReferenceDurations(strict, [], [audio(27_072)])).message).toContain('27.07 s')
+    expect(() => checkReferenceDurations(strict, [], [audio(5_056)])).not.toThrow()
+    // Declared limits with no measured length cannot be checked, so the request is refused rather than guessed at.
+    expect(refusal(() => checkReferenceDurations(strict, [], [audio()])).code).toBe('REFERENCE_DURATION_UNKNOWN')
+    expect(refusal(() => checkReferenceDurations(strict, [], [audio(500)])).code).toBe('REFERENCE_AUDIO_TOO_SHORT')
+    // A model that declares no audio range is not held to another lane's: a two-minute track passes.
+    expect(() => checkReferenceDurations(seedance, [], [audio(120_000)])).not.toThrow()
+    expect(() => checkReferenceDurations(seedance, [], [audio()])).not.toThrow()
+  })
 })
 
 describe('mode inference and defaults', () => {

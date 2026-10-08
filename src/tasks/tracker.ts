@@ -5,13 +5,21 @@
  * background job, so a task keeps being followed after its job is stopped and
  * after the host restarts.
  *
- * Money rules: a task record is removed only when the first submission was
- * refused outright, so nothing can exist under its key. Every answer that
- * leaves the outcome open (no answer, a gateway error, a 409) keeps the record,
- * and the same request is resent under the same key, which returns the
- * original task when there is one. A resend that is refused outright is
- * retried only briefly, so a refused request is not created later behind the
- * user's back.
+ * Money rules, and the rule that one operation creates at most one task:
+ *
+ * - A submission is settled by the gateway's structured verdict
+ *   (`submission_state` and `retry_action`) first, and only by the HTTP status
+ *   when it sends none. `rejected`/`retry_action: none` is final: the reason is
+ *   saved and nothing is sent again — not by the tool, not by the background
+ *   loop, not after a restart. `retryable` on its own never authorizes creating
+ *   another task.
+ * - An unknown outcome keeps the record and settles it under the SAME key and
+ *   the SAME body, which the gateway answers with the original task when there
+ *   is one. A new key is minted only for a new request the user asks for.
+ * - Once a gateway task id is known the task is only polled; a failed poll
+ *   never submits anything.
+ * - A refusal that left nothing under the key ends the record as failed with
+ *   the gateway's own reason, so the person sees why.
  * @module dsh-vibedev/tasks/tracker
  */
 
@@ -37,13 +45,12 @@ export interface TrackerOptions {
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   /** Give up on a task this long after it was created. Defaults to 3 hours. */
   readonly maxAgeMs?: number
-  /** An unconfirmed submission is resent until it is this old. Defaults to 5 minutes. */
-  readonly resendWindowMs?: number
   /**
-   * A resend refused outright is retried until the task is this old, in case
-   * an earlier attempt is still being created. Defaults to 3 minutes.
+   * How long an unconfirmed submission is reconciled under its own key before
+   * the task is given up. Defaults to 5 minutes: this settles what became of
+   * that one submission, it never creates another task.
    */
-  readonly refusalGraceMs?: number
+  readonly resendWindowMs?: number
   /** Download attempts for a finished task before its links are reported instead. Defaults to 5. */
   readonly downloadAttempts?: number
   /** The largest output downloaded. Defaults to 2 GiB. */
@@ -99,38 +106,83 @@ const SUBMISSION_AMBIGUOUS = 'VIDEO_SUBMISSION_AMBIGUOUS'
 const KEY_CONFLICT = /_IDEMPOTENCY_CONFLICT$/
 
 /**
- * Whether a failed submission may still have created the task: no answer, an
- * unreadable answer, a gateway error that is not "busy", or a 409 such as
- * `VIDEO_SUBMISSION_IN_PROGRESS` (an earlier attempt is still being submitted).
- * @param error - the failure.
- * @returns true when the same key should be sent again.
+ * How a failed submission may be taken further.
+ *
+ * - `rejected`: the request is refused for good (a parameter refusal, a
+ *   provider-side rejection, a key conflict); nothing exists under the key and
+ *   nothing may be created again for this operation.
+ * - `reconcile`: the outcome is unknown — the same key and the same body are
+ *   sent again only to settle what became of that one submission. This never
+ *   mints a new key and never asks the provider for a new task.
+ * - `wait`: nothing was created and the same request may be sent later (busy,
+ *   rate limited, no balance); the key stays the same.
  */
-export function outcomeUnknown(error: unknown): boolean {
-  if (!(error instanceof MediaError)) return false
-  if (NO_ANSWER_CODES.has(error.code)) return true
-  if (error.code === SUBMISSION_AMBIGUOUS || KEY_CONFLICT.test(error.code)) return false
-  const status = error.details.status
-  return status === 409 || (status !== undefined && status >= 500 && error.details.busy !== true)
+export type SubmissionRecovery = 'rejected' | 'reconcile' | 'wait'
+
+/** Structured verdicts the gateway sends; an unknown word falls back to the older protocol. */
+const REJECTED_STATES = new Set(['rejected', 'refused', 'denied'])
+const RECONCILE_STATES = new Set(['unknown', 'accepted'])
+/** `retry_action` values that keep the same key: a lookup of this submission, never a new one. */
+const SAME_KEY_ACTIONS = new Set(['reconcile', 'retry_same_key', 'retry_same'])
+
+/**
+ * What a failed submission means.
+ *
+ * The two STOP rules are read before anything that would keep the operation
+ * alive, so no verdict can talk the plugin into sending a refused request
+ * again: `retry_action: none` (the provider refused it) and
+ * `VIDEO_SUBMISSION_AMBIGUOUS` (the gateway's key answers this forever) end the
+ * operation even when the same answer also says the outcome is unknown.
+ *
+ * After those, the gateway's structured verdict decides, and only when it
+ * sends none do the HTTP status and the older codes. `retryable` says recovery
+ * is still needed; it never authorizes creating another task.
+ * @param error - the failure.
+ * @returns how it may be taken further.
+ */
+export function submissionRecovery(error: unknown): SubmissionRecovery {
+  if (!(error instanceof MediaError)) return 'rejected'
+  const { submissionState, retryAction, status, busy, retryable } = error.details
+  // Stop first: nothing below may turn either of these into another attempt.
+  if (retryAction === 'none') return 'rejected'
+  if (error.code === SUBMISSION_AMBIGUOUS || KEY_CONFLICT.test(error.code)) return 'rejected'
+  if (submissionState !== undefined && REJECTED_STATES.has(submissionState)) return 'rejected'
+  // Same key, same body: `retry_same_key` sends that one submission again (the gateway answers with the
+  // task it already has, or creates it once) and `reconcile` settles what became of it.
+  if (retryAction !== undefined && SAME_KEY_ACTIONS.has(retryAction)) return 'reconcile'
+  if (retryAction === 'retry') return 'wait'
+  if (submissionState !== undefined && RECONCILE_STATES.has(submissionState)) return 'reconcile'
+  if (NO_ANSWER_CODES.has(error.code)) return 'reconcile'
+  if (busy === true) return 'wait'
+  if (status !== undefined && status >= 400 && status < 500) return status === 409 ? 'reconcile' : 'rejected'
+  // A 5xx that says it will not succeed on a retry is final; an unreadable one leaves the outcome open.
+  if (status !== undefined && status >= 500) return retryable === false ? 'rejected' : 'reconcile'
+  return 'rejected'
 }
 
 /**
- * The record of a submission the gateway settled for good without a task.
+ * The failure to record when a submission is refused for good.
+ *
+ * None of these tells the person to generate again: in the two cases where the
+ * provider may already hold the request, a new generation would be a second
+ * paid task, so the wording asks them to check the records first.
  * @param error - the failure.
- * @returns the failure to record, or undefined when the error is not one of these.
+ * @returns the code and message to keep with the task.
  */
-function settledWithoutTask(error: unknown): { code: string; message: string } | undefined {
-  if (!(error instanceof MediaError)) return undefined
+function terminalFailure(error: unknown): { code: string; message: string } {
+  if (!(error instanceof MediaError)) return { code: 'SUBMISSION_REJECTED', message: messageOf(error) }
   if (error.code === SUBMISSION_AMBIGUOUS) {
     return {
       code: error.code,
-      message: 'The gateway could not confirm the submission with the provider, so it created no task and charged nothing. '
-        + 'Submit the request again if it is still wanted.',
+      message: 'The gateway could not confirm this submission with the provider, so it created no task and charged nothing, '
+        + 'and this request key will answer the same way. If the provider did receive it, that task is not visible here. '
+        + 'Check the task list and the account usage before generating the same thing again.',
     }
   }
   if (KEY_CONFLICT.test(error.code)) {
-    return { code: error.code, message: 'The gateway refused the request: its key was already used for a different request. Nothing was charged; submit it again.' }
+    return { code: error.code, message: 'The gateway refused the request: its key was already used for a different request. Nothing was charged. Check the task list for the earlier request before generating again.' }
   }
-  return undefined
+  return { code: error.code, message: error.message }
 }
 
 function sleepFor(ms: number, signal: AbortSignal): Promise<void> {
@@ -235,23 +287,28 @@ export class TaskTracker {
           await this.releaseClaim(draft.id)
           throw error
         }
-        const settled = settledWithoutTask(error)
-        if (settled !== undefined) {
-          await this.finish(draft.id, { status: 'failed', error: settled }).catch(() => undefined)
-          await this.releaseClaim(draft.id)
-          throw new MediaError(settled.message, settled.code, { retryable: false }, { cause: error })
-        }
-        if (!outcomeUnknown(error)) {
+        const recovery = submissionRecovery(error)
+        if (recovery === 'rejected') {
+          // Refused for good (a parameter refusal, a provider rejection, a key conflict): no resend,
+          // no new key, no new task — not here, not in the background, not after a restart.
+          const settled = terminalFailure(error)
           if (!unknown) {
-            // Refused before anything could exist under this key.
+            // Refused before anything could exist under this key: the caller sees the reason itself.
             this.dropClaim(draft.id)
             await this.options.store.remove(draft.id)
             throw error
           }
-          // Refused after an unanswered attempt, which may still be under way: the background resend settles it.
-          lastError = error
-          break
+          await this.finish(draft.id, { status: 'failed', error: settled }).catch(() => undefined)
+          await this.releaseClaim(draft.id)
+          throw new MediaError(settled.message, settled.code, { retryable: false }, { cause: error })
         }
+        if (!unknown && recovery === 'wait') {
+          // Nothing was created and the gateway is full or unpaid: the caller is told to try later.
+          this.dropClaim(draft.id)
+          await this.options.store.remove(draft.id)
+          throw error
+        }
+        // The outcome is open: the same key settles it, and only ever that key.
         unknown = true
         lastError = error
         await this.sleep(2_000 * (attempt + 1), this.signal)
@@ -272,7 +329,7 @@ export class TaskTracker {
     }
     this.followQuietly(draft.id)
     throw new MediaError(`The VibeDev gateway did not confirm the request (${messageOf(lastError)}). `
-      + 'dsh-vibedev keeps resending it for a few minutes under the same request key, so it cannot be created twice, and saves the result if it runs. '
+      + 'dsh-vibedev keeps settling it under the same request key for a few minutes — that key can only ever answer with the one task it may have created — and saves the result if it runs. '
       + `Check media_tasks for task ${draft.id}; do not submit the same request again.`, 'SUBMISSION_UNCONFIRMED', { retryable: false })
   }
 
@@ -439,17 +496,20 @@ export class TaskTracker {
       await this.update(record.id, { progress: 'waiting for a VibeDev sign-in' })
       return 60_000
     }
-    const settled = submitting ? settledWithoutTask(error) : undefined
-    if (settled !== undefined) {
-      await this.finish(record.id, { status: 'failed', error: settled })
-      return undefined
-    }
-    if (submitting && !outcomeUnknown(error) && status !== undefined && status >= 400 && status < 500) {
-      // The resend was refused outright, so no task exists under the key yet. An earlier
-      // attempt may still be being created; after a short grace the refusal stands.
-      if (this.now() - record.createdAt < (this.options.refusalGraceMs ?? 3 * 60_000)) return 30_000
-      await this.finish(record.id, { status: 'failed', error: { code: code ?? `HTTP_${status}`, message: messageOf(error) } })
-      return undefined
+    if (submitting) {
+      const recovery = submissionRecovery(error)
+      if (recovery === 'rejected') {
+        // A refusal that stands: the reason is saved and nothing is sent again, here or after a restart.
+        await this.finish(record.id, { status: 'failed', error: terminalFailure(error) })
+        return undefined
+      }
+      if (failures >= CONSECUTIVE_FAILURE_LIMIT) {
+        await this.finish(record.id, { status: 'failed', error: { code: code ?? 'SUBMISSION_FAILED', message: `The submission could not be settled ${failures} times in a row: ${messageOf(error)}` } })
+        return undefined
+      }
+      // `wait` (busy, no balance) and `reconcile` (outcome open) both keep the same key; only
+      // a reconciliation is a request the gateway may answer with the original task.
+      return Math.min(60_000, 5_000 * 2 ** Math.min(failures - 1, 4))
     }
     if (status === 402) {
       await this.update(record.id, { progress: 'paused: the VibeDev balance is used up; top up to receive the result' })

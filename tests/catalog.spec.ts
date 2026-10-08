@@ -16,6 +16,7 @@ describe('parseMediaCatalog', () => {
       ['seedance-2.0', 'video', undefined],
       ['seedance-2.5-vibedev', 'video', undefined],
       ['legacy-video', 'video', undefined],
+      ['lec-ty-wan-3-0-1050-480p', 'video', undefined],
       ['future-video', 'video', undefined],
       ['doubao-music-vibedev', 'audio', 'music'],
       ['doubao-podcast-vibedev', 'audio', 'podcast'],

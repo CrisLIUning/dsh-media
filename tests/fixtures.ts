@@ -99,6 +99,18 @@ export const CATALOG = {
       },
     },
     {
+      id: 'lec-ty-wan-3-0-1050-480p', media_type: 'video',
+      capabilities: { chat: false, output_modalities: ['video'], allowed_endpoints: ['/v1/videos'] },
+      video: {
+        text_to_video: true, image_to_video: true, reference_image_input: true, max_reference_images: 4,
+        reference_video_input: true, max_reference_videos: 1, reference_audio_input: true, max_reference_audios: 1,
+        durations_seconds: [5, 10], resolutions: ['480p'],
+        // This lane states its own reference ranges; the plugin must read them rather than assume another model's.
+        min_reference_video_duration_seconds: 1, max_reference_video_duration_seconds: 15,
+        min_reference_audio_duration_seconds: 1, max_reference_audio_duration_seconds: 15,
+      },
+    },
+    {
       id: 'future-video', media_type: 'video', capabilities: { output_modalities: ['video'] },
       video: { modes_schema_version: 2, modes: { text_to_video: { inputs: {} } } },
     },

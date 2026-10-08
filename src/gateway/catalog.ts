@@ -78,6 +78,13 @@ export interface VideoCapabilities {
   readonly minReferenceVideoSeconds?: number
   readonly maxReferenceVideoSeconds?: number
   readonly maxTotalReferenceVideoSeconds?: number
+  /**
+   * Declared limits on a reference AUDIO's own measured length. They are read
+   * from the model, never assumed: a lane that declares nothing is not held to
+   * another lane's range (some providers take 1–15 s, others take minutes).
+   */
+  readonly minReferenceAudioSeconds?: number
+  readonly maxReferenceAudioSeconds?: number
   /** References must be relayed through the gateway media library. */
   readonly gatewayRelayRequired?: boolean
 }
@@ -236,6 +243,7 @@ export function parseVideoCapabilities(raw: Json): VideoCapabilities {
   for (const [key, snake] of [['maxReferenceImageBytes', 'max_reference_image_bytes'], ['maxReferenceVideoBytes', 'max_reference_video_bytes'],
     ['maxReferenceAudioBytes', 'max_reference_audio_bytes'], ['maxAssetBytes', 'max_asset_bytes'],
     ['minReferenceVideoSeconds', 'min_reference_video_duration_seconds'], ['maxReferenceVideoSeconds', 'max_reference_video_duration_seconds'],
+    ['minReferenceAudioSeconds', 'min_reference_audio_duration_seconds'], ['maxReferenceAudioSeconds', 'max_reference_audio_duration_seconds'],
     ['maxTotalReferenceVideoSeconds', 'max_total_reference_video_duration_seconds']] as const) {
     const value = positive(field(raw, snake))
     if (value !== undefined) result[key] = value
