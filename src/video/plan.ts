@@ -124,6 +124,9 @@ export function describeVideoModel(model: MediaModel): string {
     limits.push(`each reference video ${video.minReferenceVideoSeconds ?? 0}-${video.maxReferenceVideoSeconds ?? '∞'} s`)
   }
   if (video.maxTotalReferenceVideoSeconds !== undefined) limits.push(`reference videos at most ${video.maxTotalReferenceVideoSeconds} s in total`)
+  if (video.minReferenceAudioSeconds !== undefined || video.maxReferenceAudioSeconds !== undefined) {
+    limits.push(`each reference audio ${video.minReferenceAudioSeconds ?? 0}-${video.maxReferenceAudioSeconds ?? '∞'} s`)
+  }
   if (video.combinations !== undefined) {
     limits.push(`allowed combinations: ${video.combinations.map(c => [c.duration === undefined ? '' : `${c.duration}s`, c.ratio ?? '', c.resolution ?? ''].filter(Boolean).join(' ')).join('; ')}`)
   }
@@ -327,12 +330,15 @@ export function referenceByteLimit(model: MediaModel, input: VideoInput): number
 }
 
 /**
- * Check reference video durations once the gateway has measured them.
+ * Check the measured lengths of the reference media once the gateway has
+ * measured them. A reference's OWN length is what is checked — never the
+ * requested output duration — and only against the limits that model declares.
  * @param model - the video model.
  * @param videos - the uploaded reference videos, in order.
+ * @param audios - the uploaded reference audios, in order.
  * @throws {@link MediaError} when a clip or the total is outside the model's limits.
  */
-export function checkReferenceDurations(model: MediaModel, videos: readonly ReferenceMedia[]): void {
+export function checkReferenceDurations(model: MediaModel, videos: readonly ReferenceMedia[], audios: readonly ReferenceMedia[] = []): void {
   const video = model.video ?? {}
   let totalMs = 0
   for (const [index, clip] of videos.entries()) {
@@ -357,6 +363,27 @@ export function checkReferenceDurations(model: MediaModel, videos: readonly Refe
   if (video.maxTotalReferenceVideoSeconds !== undefined && totalMs / 1000 > video.maxTotalReferenceVideoSeconds) {
     throw new MediaError(`The reference videos add up to ${(totalMs / 1000).toFixed(2)} s; ${model.id} takes at most ${video.maxTotalReferenceVideoSeconds} s in total.`,
       'REFERENCE_TOTAL_TOO_LONG', { field: 'reference_videos' })
+  }
+  // An audio reference is checked on its own measured length, and only when this model declares a range:
+  // the requested output duration is not its length, and no range is assumed for a model that states none.
+  const audioLimits = video.minReferenceAudioSeconds !== undefined || video.maxReferenceAudioSeconds !== undefined
+  for (const [index, clip] of audios.entries()) {
+    if (clip.durationMs === undefined) {
+      if (audioLimits) {
+        throw new MediaError(`The gateway could not measure the length of reference audio ${index + 1} ("${clip.source}"), so ${model.id}'s length limits cannot be checked. `
+          + 'Export it as a standard MP3 or WAV and try again.', 'REFERENCE_DURATION_UNKNOWN', { field: 'reference_audios' })
+      }
+      continue
+    }
+    const seconds = clip.durationMs / 1000
+    if (video.minReferenceAudioSeconds !== undefined && seconds < video.minReferenceAudioSeconds) {
+      throw new MediaError(`Reference audio ${index + 1} ("${clip.source}") is ${seconds.toFixed(2)} s; ${model.id} needs at least ${video.minReferenceAudioSeconds} s of reference audio.`,
+        'REFERENCE_AUDIO_TOO_SHORT', { field: 'reference_audios' })
+    }
+    if (video.maxReferenceAudioSeconds !== undefined && seconds > video.maxReferenceAudioSeconds) {
+      throw new MediaError(`Reference audio ${index + 1} ("${clip.source}") is ${seconds.toFixed(2)} s; ${model.id} takes at most ${video.maxReferenceAudioSeconds} s of reference audio per clip. `
+        + 'Trim it first, or use a shorter excerpt.', 'REFERENCE_AUDIO_TOO_LONG', { field: 'reference_audios' })
+    }
   }
 }
 

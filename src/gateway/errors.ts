@@ -21,6 +21,19 @@ export interface MediaErrorDetails {
   readonly retryAfterMs?: number
   /** The gateway was full and created nothing (a busy 429/503). */
   readonly busy?: boolean
+  /**
+   * The gateway's structured submission state: `rejected` (the provider refused
+   * the request; nothing exists under the key), `unknown` (the gateway cannot
+   * tell whether the provider received it) or `accepted` (a task exists).
+   * Absent on the older protocol, where the status is all there is.
+   */
+  readonly submissionState?: string
+  /**
+   * What the gateway asks next: `none` (do not try again), `reconcile` (settle
+   * the same key's outcome, do not create a task) or `retry`. `retryable` alone
+   * only says recovery is still needed; it never means "create another task".
+   */
+  readonly retryAction?: string
   /** On a task-limit refusal: tasks in progress and the account's limit. */
   readonly active?: number
   readonly limit?: number
@@ -57,6 +70,8 @@ export interface GatewayFailure {
   readonly message?: string
   readonly field?: string
   readonly retryable?: boolean
+  readonly submissionState?: string
+  readonly retryAction?: string
   readonly rechargeUrl?: string
   readonly active?: number
   readonly limit?: number
@@ -104,11 +119,16 @@ export function parseGatewayFailure(body: unknown): GatewayFailure {
   const rechargeUrl = text(source.recharge_url) ?? text(root.recharge_url)
   const numbers = { active: count(source.active), limit: count(source.limit) }
   const amounts = { estimatedCny: amount(source.estimated_cny), availableCny: amount(source.available_cny), pendingCny: amount(source.pending_cny) }
+  // The submission verdict may sit beside the error object or inside it; an unknown value is kept as it came.
+  const submissionState = text(source.submission_state) ?? text(root.submission_state)
+  const retryAction = text(source.retry_action) ?? text(root.retry_action)
   return {
     ...code === undefined ? {} : { code },
     ...message === undefined ? {} : { message },
     ...field === undefined ? {} : { field },
     ...typeof source.retryable === 'boolean' ? { retryable: source.retryable } : {},
+    ...submissionState === undefined ? {} : { submissionState: submissionState.toLowerCase() },
+    ...retryAction === undefined ? {} : { retryAction: retryAction.toLowerCase() },
     ...rechargeUrl === undefined ? {} : { rechargeUrl },
     ...Object.fromEntries(Object.entries({ ...numbers, ...amounts }).filter(([, value]) => value !== undefined)),
   }

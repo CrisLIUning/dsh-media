@@ -148,7 +148,7 @@ export interface Submitted {
 /**
  * Submit a task and start its report. An unconfirmed submission is not an
  * error here: the agent must not resubmit it, so it is reported like any
- * other task while the tracker resends it under the same key.
+ * other task while the tracker settles that one submission under the same key.
  * @param runtime - the media runtime.
  * @param exec - the tool call.
  * @param draft - the task to submit.
@@ -169,8 +169,8 @@ export async function submitTask(runtime: MediaRuntime, exec: ToolRunContext, dr
 }
 
 /** The sentence about an unconfirmed submission. */
-export const UNCONFIRMED_NOTE = 'The gateway did not confirm the submission; dsh-vibedev keeps resending it for a few minutes under the same request key, '
-  + 'so it cannot be created twice. Do not submit it again.'
+export const UNCONFIRMED_NOTE = 'The gateway did not confirm the submission; dsh-vibedev keeps settling that same submission under the same request key for a few minutes, '
+  + 'so no second task can be created from it. Do not submit it again.'
 
 /**
  * Wait for a task in the tool call itself, for hosts without background jobs.
