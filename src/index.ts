@@ -122,7 +122,7 @@ export const Config = Schema.object({
   gatewayOrigin: Schema.string().default(DEFAULT_GATEWAY_ORIGIN),
   client: Schema.string().default('vibedev-plugin'),
   primary: Schema.boolean().default(false),
-  apiKeyEnv: Schema.string().default('VIBEDEV_GATEWAY_API_KEY'),
+  apiKeyEnv: Schema.string().default(''),
   stateDir: Schema.string().default(''),
 }).i18n({
   'zh-CN': {

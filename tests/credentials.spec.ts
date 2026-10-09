@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
 import type { DeepSeekAccount } from '@deepseek-ai/dsh-deepseek-account'
-import { CredentialChain, grantStorage } from '../src/auth/credentials.js'
+import { CredentialChain, gatewayGrantKey, grantStorage } from '../src/auth/credentials.js'
+import { DEFAULT_GATEWAY_ORIGIN } from '../src/gateway/origin.js'
 import type { PluginLogin } from '../src/auth/login.js'
 
 let dir: string
@@ -54,7 +55,7 @@ describe('CredentialChain', () => {
 })
 
 describe('grantStorage', () => {
-  const grant = { gatewayOrigin: 'https://vibedev.jzsaas.com', accessToken: 'vdat_1', refreshToken: 'vdrt_1', expiresAt: 1, refreshExpiresAt: 2 }
+  const grant = { gatewayOrigin: DEFAULT_GATEWAY_ORIGIN, accessToken: 'vdat_1', refreshToken: 'vdrt_1', expiresAt: 1, refreshExpiresAt: 2 }
 
   it('keeps the grant in the host credential store as an opaque record', async () => {
     const records = new Map<string, CredentialRecord>()
@@ -69,7 +70,7 @@ describe('grantStorage', () => {
     } as unknown as CredentialProvider
     const storage = grantStorage(dir, () => store)
     await storage.write(grant)
-    expect([...records.entries()]).toEqual([['dsh-media/vibedev-session', { kind: 'grant', payload: grant }]])
+    expect([...records.entries()]).toEqual([[gatewayGrantKey(DEFAULT_GATEWAY_ORIGIN), { kind: 'grant', payload: grant }]])
     expect(await storage.read()).toEqual(grant)
     await storage.write(undefined)
     expect(records.size).toBe(0)
@@ -92,7 +93,7 @@ describe('grantStorage', () => {
     await storage.write(grant)
     const seen: unknown[] = []
     await storage.update(async (current) => { seen.push(current); return { kind: 'set', grant: { ...grant, accessToken: 'vdat_2' } } })
-    expect(records.get('dsh-media/vibedev-session')).toEqual({ kind: 'grant', payload: { ...grant, accessToken: 'vdat_2' } })
+    expect(records.get(gatewayGrantKey(DEFAULT_GATEWAY_ORIGIN))).toEqual({ kind: 'grant', payload: { ...grant, accessToken: 'vdat_2' } })
     await storage.update(async () => ({ kind: 'keep' }))
     expect(records.size).toBe(1)
     await storage.update(async () => ({ kind: 'delete' }))

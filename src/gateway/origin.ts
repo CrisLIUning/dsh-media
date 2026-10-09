@@ -2,10 +2,8 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
-/** The historical production gateway; unmarked pre-migration state belongs only here. */
-export const DEFAULT_GATEWAY_ORIGIN = 'https://vibedev.jzsaas.com'
-/** An explicit candidate, never the default or a retry destination. */
-export const US_GATEWAY_ORIGIN = 'https://api.vibedev.studio'
+/** Production API origin. Storage URLs are returned by the server, not derived from this address. */
+export const DEFAULT_GATEWAY_ORIGIN = 'https://api.vibedev.studio'
 
 /** Validate a bare HTTP(S) origin and canonicalize default ports, casing and trailing slash. */
 export function normalizeGatewayOrigin(value: string): string {
@@ -20,14 +18,15 @@ export function gatewayId(origin: string): string {
   return createHash('sha256').update(normalizeGatewayOrigin(origin)).digest('hex')
 }
 
-/** Keep domestic legacy state in place; other gateways always get a separate empty namespace. */
+/** Every gateway uses its own namespace; never read the unmarked historical root. */
 export function gatewayStateDirectory(root: string, origin: string): string {
-  return normalizeGatewayOrigin(origin) === DEFAULT_GATEWAY_ORIGIN ? root : join(root, 'gateways', gatewayId(origin))
+  return join(root, 'gateways', gatewayId(origin))
 }
 
-/** The old shared development-key variable is domestic only. Desktop account mode disables it entirely. */
+/** Ignore the old shared key variable; development requires an explicitly named, gateway-specific variable. */
 export function developmentKey(origin: string, name: string, env: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
+  normalizeGatewayOrigin(origin)
   const key = name.trim()
-  if (key === '' || key === 'VIBEDEV_GATEWAY_API_KEY' && normalizeGatewayOrigin(origin) !== DEFAULT_GATEWAY_ORIGIN) return undefined
+  if (key === '' || key === 'VIBEDEV_GATEWAY_API_KEY') return undefined
   return env[key]?.trim() || undefined
 }

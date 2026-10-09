@@ -59,12 +59,9 @@ export class CredentialChain {
   }
 }
 
-// Named after the plugin's former name, dsh-media: keeping the key lets an upgrade keep the sign-in.
-export const GRANT_KEY = credentialKey('dsh-media', 'vibedev-session')
-
 /** Credential identity for one gateway; never consult another gateway's record. */
 export function gatewayGrantKey(origin: string) {
-  return normalizeGatewayOrigin(origin) === DEFAULT_GATEWAY_ORIGIN ? GRANT_KEY : credentialKey('dsh-vibedev', `gateway-${gatewayId(origin)}`)
+  return credentialKey('dsh-vibedev', `gateway-${gatewayId(origin)}`)
 }
 
 function isGrant(value: unknown): value is PluginGrant {
@@ -79,7 +76,7 @@ function isGrant(value: unknown): value is PluginGrant {
  * directory. The device id is not a secret and lives in the state directory.
  * @param root - the plugin state root; the storage selects an origin-specific directory itself.
  * @param credentials - the host's credential store, when loaded.
- * @param selectedOrigin - the issuing gateway; historical unmarked state is domestic only.
+ * @param selectedOrigin - the issuing gateway; unmarked historical state is never adopted.
  * @returns the storage.
  */
 export function grantStorage(root: string, credentials: () => CredentialProvider | undefined, selectedOrigin = DEFAULT_GATEWAY_ORIGIN): GrantStorage {
@@ -87,7 +84,7 @@ export function grantStorage(root: string, credentials: () => CredentialProvider
   const key = gatewayGrantKey(origin)
   const stateDir = gatewayStateDirectory(root, origin)
   const readGrant = (value: unknown): PluginGrant | undefined => isGrant(value)
-    && (value.gatewayOrigin === origin || value.gatewayOrigin === undefined && origin === DEFAULT_GATEWAY_ORIGIN) ? value : undefined
+    && value.gatewayOrigin === origin ? value : undefined
   const bind = (grant: PluginGrant): PluginGrant => {
     if (grant.gatewayOrigin !== undefined && grant.gatewayOrigin !== origin) throw new Error('Cannot store a grant issued by another gateway.')
     return { ...grant, gatewayOrigin: origin }

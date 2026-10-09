@@ -24,7 +24,7 @@ export interface GatewayCredential {
 
 /** Construction options; `fetch` and `sleep` are test seams. */
 export interface GatewayHttpOptions {
-  /** Gateway origin, such as `https://vibedev.jzsaas.com`. */
+  /** Gateway origin, such as `https://api.vibedev.studio`. */
   readonly origin: string
   /** The credential for the next request; undefined while nobody is signed in. */
   readonly resolveCredential: () => Promise<GatewayCredential | undefined>

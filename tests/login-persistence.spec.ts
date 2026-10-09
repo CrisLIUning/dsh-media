@@ -8,15 +8,15 @@ import ToolRuntime from '@deepseek-ai/dsh-tools'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import * as Media from '../src/index.js'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
-import { grantStorage } from '../src/auth/credentials.js'
+import { gatewayGrantKey, grantStorage } from '../src/auth/credentials.js'
 import * as FileWrites from '../src/util/files.js'
 import { PluginLogin } from '../src/auth/login.js'
 import type { GrantStorage, PluginGrant } from '../src/auth/login.js'
 import { fakeFetch, json } from './helpers.js'
 
 const NOW = Date.parse('2026-10-06T10:00:00Z')
-const KEY = 'dsh-media/vibedev-session'
-const fixtureGrant = (suffix = 'one'): PluginGrant => ({ gatewayOrigin: 'https://vibedev.jzsaas.com', accessToken: `fixture-access-${suffix}`, refreshToken: `fixture-refresh-${suffix}`,
+const KEY = gatewayGrantKey('https://api.vibedev.studio')
+const fixtureGrant = (suffix = 'one'): PluginGrant => ({ gatewayOrigin: 'https://api.vibedev.studio', accessToken: `fixture-access-${suffix}`, refreshToken: `fixture-refresh-${suffix}`,
   expiresAt: NOW + 3_600_000, refreshExpiresAt: NOW + 30 * 86_400_000 })
 let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'dsh-media-login-persist-')) })
@@ -35,7 +35,7 @@ function recordStore(initial?: PluginGrant) {
   } as unknown as CredentialProvider
   return { records, provider }
 }
-const loginOf = (storage: GrantStorage) => new PluginLogin({ origin: 'https://vibedev.jzsaas.com', storage, now: () => NOW,
+const loginOf = (storage: GrantStorage) => new PluginLogin({ origin: 'https://api.vibedev.studio', storage, now: () => NOW,
   userAgent: 'persistence-fixture', fetch: fakeFetch().fetch, openBrowser: async () => false })
 
 describe('sign-in persistence across startup and provider recovery', () => {
@@ -136,7 +136,7 @@ describe('sign-in persistence across startup and provider recovery', () => {
       read: () => firstRead, write: async grant => { saved = grant }, update: async () => {}, deviceId: async () => 'fixture-device',
     }
     const gateway = fakeFetch(json(200, { access_token: 'fixture-access-one', refresh_token: 'fixture-refresh-one', expires_in: 3600, refresh_expires_in: 2_592_000 }))
-    const login = new PluginLogin({ origin: 'https://vibedev.jzsaas.com', storage, now: () => NOW, userAgent: 'persistence-fixture', fetch: gateway.fetch })
+    const login = new PluginLogin({ origin: 'https://api.vibedev.studio', storage, now: () => NOW, userAgent: 'persistence-fixture', fetch: gateway.fetch })
     const startup = login.token()
     const pending = await login.startSignIn({ open: false })
     const authorization = new URL(pending.url)
@@ -158,18 +158,18 @@ describe('sign-in persistence across startup and provider recovery', () => {
     const store = recordStore({ ...fixtureGrant(), expiresAt: Date.now() + 3_600_000, refreshExpiresAt: Date.now() + 30 * 86_400_000 })
     vi.stubGlobal('fetch', async (input: string | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url === 'https://vibedev.jzsaas.com/v1/models') {
+      if (url === 'https://api.vibedev.studio/v1/models') {
         headers.push(new Headers(init?.headers).get('authorization') ?? '')
         return json(200, { data: [] })
       }
-      if (url === 'https://vibedev.jzsaas.com/v1/account/auth/me') return json(200, { data: { balance: '1', currency: 'CNY' } })
+      if (url === 'https://api.vibedev.studio/v1/account/auth/me') return json(200, { data: { balance: '1', currency: 'CNY' } })
       throw new Error('Unexpected fixture request')
     })
     try {
       await ctx.plugin(SystemPrompt)
       await ctx.plugin(ToolRuntime)
       await ctx.plugin(LlmRuntime)
-      await ctx.plugin(Media, { gatewayOrigin: 'https://vibedev.jzsaas.com', apiKeyEnv: '', stateDir: dir, openBrowserOnSignIn: false })
+      await ctx.plugin(Media, { gatewayOrigin: 'https://api.vibedev.studio', apiKeyEnv: '', stateDir: dir, openBrowserOnSignIn: false })
       const status = async () => {
         const result = await ctx.tools.execute({ callId: ToolCallId('persistence-status'), name: 'media_account', arguments: { action: 'status' }, signal: new AbortController().signal })
         return result.content.map((part) => part.type === 'text' ? part.text : '').join('\n')

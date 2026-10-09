@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { CredentialProvider, CredentialRecord } from '@deepseek-ai/dsh-credentials'
-import { GRANT_KEY, gatewayGrantKey, grantStorage } from '../src/auth/credentials.js'
+import { gatewayGrantKey, grantStorage } from '../src/auth/credentials.js'
 import { PluginLogin } from '../src/auth/login.js'
-import { DEFAULT_GATEWAY_ORIGIN, US_GATEWAY_ORIGIN, gatewayStateDirectory, normalizeGatewayOrigin, developmentKey } from '../src/gateway/origin.js'
+import { DEFAULT_GATEWAY_ORIGIN, gatewayStateDirectory, normalizeGatewayOrigin, developmentKey } from '../src/gateway/origin.js'
 import { GatewayHttp } from '../src/gateway/http.js'
 import { MediaLibrary } from '../src/gateway/assets.js'
 import { TaskStore } from '../src/tasks/store.js'
@@ -19,13 +19,16 @@ let dir: string
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'vibedev-origin-')) })
 afterEach(async () => { await rm(dir, { recursive: true, force: true }) })
 const grant = { accessToken: 'fixture-cn-access', refreshToken: 'fixture-cn-refresh', expiresAt: Date.now() + 3_600_000, refreshExpiresAt: Date.now() + 86_400_000 }
+const GRANT_KEY = 'dsh-media/vibedev-session'
+const US_GATEWAY_ORIGIN = 'https://api.vibedev.studio'
 
 describe('gateway origin boundary', () => {
-  it('keeps only the historical domestic bucket compatible and canonicalizes equivalent origins', () => {
+  it('defaults to America and isolates every origin from the unmarked historical state', () => {
+    expect(DEFAULT_GATEWAY_ORIGIN).toBe(US_GATEWAY_ORIGIN)
     expect(normalizeGatewayOrigin('HTTPS://API.VIBEDEV.STUDIO:443/')).toBe(US_GATEWAY_ORIGIN)
-    expect(gatewayStateDirectory(dir, DEFAULT_GATEWAY_ORIGIN)).toBe(dir)
+    expect(gatewayStateDirectory(dir, DEFAULT_GATEWAY_ORIGIN)).not.toBe(dir)
     expect(gatewayStateDirectory(dir, US_GATEWAY_ORIGIN)).not.toBe(dir)
-    expect(gatewayGrantKey(DEFAULT_GATEWAY_ORIGIN)).toBe(GRANT_KEY)
+    expect(gatewayGrantKey(DEFAULT_GATEWAY_ORIGIN)).not.toBe(GRANT_KEY)
     expect(gatewayGrantKey(US_GATEWAY_ORIGIN)).not.toBe(GRANT_KEY)
     expect(gatewayGrantKey('HTTPS://API.VIBEDEV.STUDIO:443/')).toBe(gatewayGrantKey(US_GATEWAY_ORIGIN))
     expect(gatewayStateDirectory(dir, 'http://localhost:1234')).not.toBe(gatewayStateDirectory(dir, 'http://localhost:1235'))
@@ -57,7 +60,7 @@ describe('gateway origin boundary', () => {
       expect(JSON.stringify([...records])).toBe(before)
       await storage.write({ ...grant, accessToken: 'fixture-us-access', refreshToken: 'fixture-us-refresh' })
       expect((await storage.read())?.accessToken).toBe('fixture-us-access')
-      expect((await grantStorage(dir, () => store, DEFAULT_GATEWAY_ORIGIN).read())?.accessToken).toBe('fixture-cn-access')
+      expect(records.get(GRANT_KEY)).toEqual({ kind: 'grant', payload: grant })
       await storage.write(undefined)
       expect(JSON.stringify([...records])).toBe(before)
     } finally { login.dispose() }
@@ -67,7 +70,7 @@ describe('gateway origin boundary', () => {
     const storage = grantStorage(dir, () => undefined, US_GATEWAY_ORIGIN)
     await storage.write(grant)
     const file = join(gatewayStateDirectory(dir, US_GATEWAY_ORIGIN), 'session.json')
-    await writeFile(file, JSON.stringify({ ...grant, gatewayOrigin: DEFAULT_GATEWAY_ORIGIN }))
+    await writeFile(file, JSON.stringify({ ...grant, gatewayOrigin: 'https://previous.gateway.example' }))
     expect(await storage.read()).toBeUndefined()
     await writeFile(file, JSON.stringify(grant))
     expect(await storage.read()).toBeUndefined()
