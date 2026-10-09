@@ -89,9 +89,10 @@ export function PrimaryLauncher({ t, store, owner }: { t: Translate; store: Acco
     ]
     : pending
       ? [
-        { type: 'label', id: 'pending', text: t('pendingStatus') },
-        { id: 'open-pending', label: t('pendingLink') },
-        { id: 'cancel', label: t('cancelSignIn') },
+        { type: 'label', id: 'pending', text: view?.attempt?.phase === 'committing' ? t('signInCommitting')
+          : view?.attempt?.phase === 'exchanging' ? t('signInExchanging') : t('pendingStatus') },
+        ...view?.attempt === undefined || view.attempt.phase === 'waiting-browser' ? [{ id: 'open-pending', label: t('pendingLink') }] : [],
+        { id: 'cancel', label: t('cancelSignIn'), disabled: view?.attempt?.phase === 'committing' },
         { type: 'separator', id: 'separator-settings' },
         settings,
       ]

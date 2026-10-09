@@ -13,13 +13,17 @@
  * @module dsh-vibedev/auth/login
  */
 
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
-import type { Server } from 'node:http'
+import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { arch, platform, release } from 'node:os'
 import { MediaError } from '../gateway/errors.js'
+import { normalizeGatewayOrigin } from '../gateway/origin.js'
+import { attemptLog, failureMessage, failurePage, REDEEM_PATH, transportFailure } from './sign-in-state.js'
+import type { SignInAttempt, SignInFailure } from './sign-in-state.js'
+export type { SignInAttempt } from './sign-in-state.js'
 
 /** A stored plugin session. */
 export interface PluginGrant {
@@ -63,7 +67,7 @@ export interface PluginLoginOptions {
   readonly now?: () => number
   /** Open a URL in the system browser; resolves whether that was attempted successfully. */
   readonly openBrowser?: (url: string) => Promise<boolean>
-  /** How long a started sign-in waits for the browser. Defaults to 5 minutes. */
+  /** Sign-in deadline through credential exchange, before the atomic write starts. Defaults to 5 minutes. */
   readonly signInTimeoutMs?: number
   /** The client name the gateway records for the sign-in (it picks the key the usage is billed to). Defaults to `vibedev-plugin`. */
   readonly client?: string
@@ -80,6 +84,16 @@ export interface PendingSignIn {
 
 const REFRESH_MARGIN_MS = 2 * 60_000
 const CALLBACK_PATH = '/dsh-media/callback'
+
+interface ActiveSignIn {
+  readonly id: string
+  readonly expiresAt: number
+  readonly ready: Promise<PendingSignIn>
+  readonly done: Promise<PluginGrant>
+  url?: string
+  committing: boolean
+  cancel(phase: 'cancelled' | 'expired'): void
+}
 
 function base64url(data: Buffer): string {
   return data.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -152,7 +166,8 @@ export class PluginLogin {
   private revision = 0
   private readFailureReported = false
   private refreshing: Promise<PluginGrant | undefined> | undefined
-  private pending: (PendingSignIn & { server: Server; cancel: (reason: Error) => void }) | undefined
+  private pending: ActiveSignIn | undefined
+  private attempt: SignInAttempt | undefined
   private readonly listeners = new Set<() => void>()
   private readonly now: () => number
   private readonly origin: string
@@ -162,7 +177,7 @@ export class PluginLogin {
    */
   constructor(private readonly options: PluginLoginOptions) {
     this.now = options.now ?? Date.now
-    this.origin = options.origin.trim().replace(/\/+$/, '')
+    this.origin = normalizeGatewayOrigin(options.origin)
   }
 
   private readStored(notify: boolean): Promise<void> {
@@ -199,9 +214,30 @@ export class PluginLogin {
     const changed = this.grant?.accessToken !== grant?.accessToken
     this.grant = grant
     if (!changed) return
+    this.notify()
+  }
+
+  private notify(): void {
     for (const listener of this.listeners) {
       try { listener() } catch { /* listeners cannot break sign-in */ }
     }
+  }
+
+  /** A copied safe snapshot, retained after completion until the next sign-in. */
+  signInAttempt(): SignInAttempt | undefined {
+    return this.attempt === undefined ? undefined : Object.freeze({ ...this.attempt })
+  }
+
+  private logAttempt(event: Parameters<typeof attemptLog>[0]): void {
+    if (this.attempt === undefined) return
+    try { this.options.log?.(attemptLog(event, this.attempt)) } catch { /* diagnostic sinks cannot break sign-in */ }
+  }
+
+  private transition(id: string, change: Partial<SignInAttempt>, event: Parameters<typeof attemptLog>[0] = 'phase'): void {
+    if (this.attempt?.id !== id) return
+    this.attempt = { ...this.attempt, ...change }
+    this.logAttempt(event)
+    this.notify()
   }
 
   private async save(grant: PluginGrant | undefined): Promise<void> {
@@ -227,7 +263,8 @@ export class PluginLogin {
 
   /** Whether a sign-in is waiting for the browser, and its link. */
   pendingSignIn(): { url: string; expiresAt: number } | undefined {
-    return this.pending === undefined ? undefined : { url: this.pending.url, expiresAt: this.pending.expiresAt }
+    const pending = this.pending
+    return pending?.url === undefined ? undefined : { url: pending.url, expiresAt: pending.expiresAt }
   }
 
   /**
@@ -284,7 +321,7 @@ export class PluginLogin {
           const response = await this.post('/api/v1/vibedev/app-token/refresh', { refresh_token: stored.refreshToken, device_id: deviceId })
           const body = await response.json().catch(() => undefined)
           if (response.status === 401 || response.status === 403) {
-            this.options.log?.(`dsh-vibedev: the VibeDev session ended (${text(record(body)?.reason) ?? response.status}); signed out`)
+            this.options.log?.(`dsh-vibedev: the VibeDev session ended (HTTP ${response.status}); signed out`)
             outcome = undefined
             return { kind: 'delete' }
           }
@@ -307,7 +344,7 @@ export class PluginLogin {
     return this.refreshing
   }
 
-  private post(path: string, json: unknown, token?: string): Promise<Response> {
+  private post(path: string, json: unknown, token?: string, signal = AbortSignal.timeout(30_000)): Promise<Response> {
     return (this.options.fetch ?? globalThis.fetch)(`${this.origin}${path}`, {
       method: 'POST',
       headers: {
@@ -316,7 +353,7 @@ export class PluginLogin {
       },
       body: JSON.stringify(json),
       redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
+      signal,
     })
   }
 
@@ -328,106 +365,197 @@ export class PluginLogin {
    * @returns the authorization link, whether a browser was opened, and the completion.
    */
   async startSignIn(request: { open?: boolean } = {}): Promise<PendingSignIn & { opened: boolean }> {
-    const open = (url: string): Promise<boolean> => request.open === false ? Promise.resolve(false) : (this.options.openBrowser ?? openInBrowser)(url)
-    if (this.pending !== undefined && this.pending.expiresAt > this.now()) {
-      const opened = await open(this.pending.url)
-      return { url: this.pending.url, expiresAt: this.pending.expiresAt, done: this.pending.done, opened }
-    }
+    if (this.pending !== undefined && !this.pending.committing && this.pending.expiresAt <= this.now()) this.pending.cancel('expired')
+    const active = this.pending ?? this.beginSignIn()
+    const started = await active.ready
+    const opened = request.open === false || this.pending !== active ? false
+      : await (this.options.openBrowser ?? openInBrowser)(started.url).catch(() => false)
+    return { ...started, opened }
+  }
+
+  private beginSignIn(): ActiveSignIn {
     const verifier = base64url(randomBytes(32))
     const challenge = base64url(createHash('sha256').update(verifier).digest())
     const state = base64url(randomBytes(18))
+    const id = randomUUID()
+    const expiresAt = this.now() + (this.options.signInTimeoutMs ?? 5 * 60_000)
+    const controller = new AbortController()
     let resolveDone!: (grant: PluginGrant) => void
     let rejectDone!: (error: Error) => void
     const done = new Promise<PluginGrant>((resolve, reject) => { resolveDone = resolve; rejectDone = reject })
     done.catch(() => undefined)
-    let settled = false
-    const server = createServer((request, response) => {
+    let resolveReady!: (value: PendingSignIn) => void
+    let rejectReady!: (error: Error) => void
+    const ready = new Promise<PendingSignIn>((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
+    ready.catch(() => undefined)
+    let finished = false
+    let claimed = false
+    let server: Server | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const finish = (): void => {
+      finished = true
+      clearTimeout(timer)
+      server?.close()
+      server?.closeAllConnections?.()
+      if (this.pending === active) this.pending = undefined
+    }
+    const fail = (failure: SignInFailure, phase: 'failed' | 'cancelled' | 'expired' = 'failed'): MediaError => {
+      // Drop the old session before notifying: a listener may immediately start a new attempt.
+      const attempt: SignInAttempt = { ...this.attempt as SignInAttempt, ...failure, phase }
+      const error = new MediaError(phase === 'cancelled' ? 'The sign-in was cancelled.' : failureMessage(attempt),
+        phase === 'expired' ? 'SIGN_IN_TIMEOUT' : phase === 'cancelled' ? 'SIGN_IN_CANCELLED' : 'SIGN_IN_REFUSED',
+        attempt.httpStatus === undefined ? {} : { status: attempt.httpStatus })
+      finish()
+      // Never attach the original error as a cause: rejections are exposed by host routes/callers.
+      controller.abort()
+      this.transition(id, { ...failure, phase }, 'terminal')
+      rejectReady(error)
+      rejectDone(error)
+      return error
+    }
+    const active: ActiveSignIn = {
+      id, expiresAt, ready, done, committing: false,
+      cancel: phase => { if (!finished && !active.committing) fail(phase === 'expired' ? { errorCode: 'timeout' } : {}, phase) },
+    }
+    this.pending = active
+    this.attempt = { id, expiresAt, gatewayOrigin: this.origin, phase: 'preparing', stage: 'listen' }
+    this.logAttempt('request')
+    this.notify()
+    const live = (): boolean => {
+      if (finished || this.pending !== active) return false
+      if (!active.committing && this.now() >= expiresAt) { active.cancel('expired'); return false }
+      return true
+    }
+    if (!live()) return active
+    timer = setTimeout(() => active.cancel('expired'), Math.max(0, expiresAt - this.now()))
+    timer.unref()
+    const callback = (request: IncomingMessage, response: ServerResponse): void => {
       const url = new URL(request.url ?? '/', 'http://127.0.0.1')
       if (url.pathname !== CALLBACK_PATH) { response.writeHead(404).end(); return }
       const answer = (status: number, title: string, body: string) => {
         response.writeHead(status, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(PAGE(title, body))
       }
-      if (settled) { answer(410, 'VibeDev', '<h1>This sign-in link has already been used.</h1><p>此登录链接已使用过。</p>'); return }
-      if (url.searchParams.get('state') !== state || url.searchParams.get('code') === null) {
+      if (request.method !== 'GET') { response.setHeader('allow', 'GET'); answer(405, 'VibeDev', '<h1>Use GET for sign-in.</h1><p>请使用浏览器登录回调。</p>'); return }
+      if (claimed || !live()) { answer(410, 'VibeDev', '<h1>This sign-in link has already been used.</h1><p>此登录链接已使用过或已失效。</p>'); return }
+      const states = url.searchParams.getAll('state')
+      const codes = url.searchParams.getAll('code')
+      const code = codes[0]
+      if (states.length !== 1 || states[0] !== state || codes.length !== 1 || code === undefined || code.trim() === '') {
         answer(400, 'VibeDev', '<h1>Sign-in could not be completed.</h1><p>登录未完成：链接无效，请回到对话重新登录。</p>')
         return
       }
-      settled = true
-      const code = url.searchParams.get('code') as string
-      this.redeem(code, verifier).then((grant) => {
-        const who = grant.user?.email ?? grant.user?.nickname
-        answer(200, 'VibeDev', `<h1>Signed in to VibeDev${who === undefined ? '' : ` as ${who.replace(/[<>&"]/g, '')}`}.</h1>`
+      claimed = true
+      this.transition(id, { phase: 'exchanging', stage: 'device' }, 'request')
+      void (async () => {
+        let grant: PluginGrant
+        try {
+          if (!live()) return
+          const deviceId = await this.options.storage.deviceId()
+          if (!live()) return
+          this.transition(id, { stage: 'redeem' }, 'request')
+          if (!live()) return
+          const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])
+          const response = await this.post(REDEEM_PATH, {
+            code, code_verifier: verifier, token_type: 'app', client: this.options.client ?? 'vibedev-plugin',
+            device_id: deviceId, device_model: `${platform()}-${arch()}`.slice(0, 128), os_version: release().slice(0, 128),
+          }, undefined, signal)
+          if (!live()) { void response.body?.cancel().catch(() => undefined); return }
+          this.transition(id, { httpStatus: response.status }, 'response')
+          if (!live()) { void response.body?.cancel().catch(() => undefined); return }
+          if (!response.ok) {
+            void response.body?.cancel().catch(() => undefined)
+            const errorCode = response.status === 429 || response.status >= 500 ? 'gateway-unavailable'
+              : response.status >= 400 && response.status < 500 ? 'gateway-refused' : 'protocol'
+            answer(502, 'VibeDev', failurePage({ ...this.attempt as SignInAttempt, errorCode }))
+            fail({ errorCode })
+            return
+          }
+          let body: unknown
+          try { body = await response.json() } catch (error) {
+            if (!live()) return
+            const transport = transportFailure(error)
+            const failure = transport.networkCode !== undefined || transport.errorCode === 'timeout' ? transport : { errorCode: 'protocol' as const }
+            answer(502, 'VibeDev', failurePage({ ...this.attempt as SignInAttempt, ...failure }))
+            fail(failure)
+            return
+          }
+          if (!live()) return
+          const envelope = record(body)
+          const validEnvelope = envelope !== undefined
+            && (envelope.code === undefined || envelope.code === 0)
+            && (envelope.data === undefined || record(envelope.data) !== undefined)
+          const parsed = validEnvelope ? parseGrant(body, this.now()) : undefined
+          if (parsed === undefined) {
+            answer(502, 'VibeDev', failurePage({ ...this.attempt as SignInAttempt, errorCode: 'protocol' }))
+            fail({ errorCode: 'protocol' })
+            return
+          }
+          grant = parsed
+          // GrantStorage writes are atomic but cannot be undone mid-write. This is
+          // the linearization point: cancel/deadline stop here; sign-out awaits done.
+          active.committing = true
+          clearTimeout(timer)
+          this.transition(id, { phase: 'committing', stage: 'persist' })
+          await this.save(grant)
+        } catch (error) {
+          if (finished || this.pending !== active) return
+          const failure: SignInFailure = this.attempt?.stage === 'device' || this.attempt?.stage === 'persist'
+            ? { errorCode: 'storage' } : transportFailure(error)
+          answer(502, 'VibeDev', failurePage({ ...this.attempt as SignInAttempt, ...failure }))
+          fail(failure)
+          return
+        }
+        answer(200, 'VibeDev', '<h1>Signed in to VibeDev.</h1>'
           + '<p>已登录 VibeDev，可以关闭此页面，回到对话继续。</p><p>You can close this tab and return to the conversation.</p>')
         finish()
+        this.transition(id, { phase: 'succeeded' }, 'terminal')
         resolveDone(grant)
-      }, (error: unknown) => {
-        answer(502, 'VibeDev', '<h1>Sign-in failed.</h1><p>登录失败，请回到对话重新登录。</p>')
-        finish()
-        rejectDone(error instanceof Error ? error : new Error(String(error)))
+      })()
+    }
+    try {
+      server = createServer(callback)
+      server.on('error', () => {
+        if (finished || active.committing) return
+        this.transition(id, { stage: 'listen' })
+        if (!finished) fail({ errorCode: 'callback' })
       })
-    })
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', () => { server.off('error', reject); resolve() })
-    })
-    const port = (server.address() as AddressInfo).port
-    const callback = `http://127.0.0.1:${port}${CALLBACK_PATH}`
-    const url = `${this.origin}/vibedev-link?${new URLSearchParams({
-      callback, state, response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', client: this.options.client ?? 'vibedev-plugin',
-    }).toString()}`
-    const timeoutMs = this.options.signInTimeoutMs ?? 5 * 60_000
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      finish()
-      rejectDone(new MediaError('The VibeDev sign-in was not completed in time.', 'SIGN_IN_TIMEOUT'))
-    }, timeoutMs)
-    timer.unref()
-    const finish = (): void => {
-      clearTimeout(timer)
-      server.close()
-      server.closeAllConnections?.()
-      if (this.pending?.server === server) this.pending = undefined
+      server.listen(0, '127.0.0.1', () => {
+        if (!live()) { server?.close(); server?.closeAllConnections?.(); return }
+        const port = (server?.address() as AddressInfo).port
+        const url = `${this.origin}/vibedev-link?${new URLSearchParams({
+          callback: `http://127.0.0.1:${port}${CALLBACK_PATH}`, state, response_type: 'code',
+          code_challenge: challenge, code_challenge_method: 'S256', client: this.options.client ?? 'vibedev-plugin',
+        }).toString()}`
+        active.url = url
+        this.transition(id, { phase: 'waiting-browser', stage: undefined })
+        if (live()) resolveReady({ url, expiresAt, done })
+      })
+    } catch {
+      if (!finished) fail({ errorCode: 'callback' })
     }
-    this.pending = {
-      url, expiresAt: this.now() + timeoutMs, done, server,
-      cancel: (reason) => { if (!settled) { settled = true; finish(); rejectDone(reason) } },
-    }
-    const opened = await open(url)
-    return { url, expiresAt: this.now() + timeoutMs, done, opened }
-  }
-
-  private async redeem(code: string, verifier: string): Promise<PluginGrant> {
-    const response = await this.post('/api/v1/vibedev/link/redeem', {
-      code, code_verifier: verifier, token_type: 'app', client: this.options.client ?? 'vibedev-plugin',
-      device_id: await this.options.storage.deviceId(),
-      device_model: `${platform()}-${arch()}`.slice(0, 128),
-      os_version: release().slice(0, 128),
-    })
-    const body = await response.json().catch(() => undefined)
-    if (!response.ok) {
-      throw new MediaError(`The VibeDev gateway refused the sign-in (HTTP ${response.status}${text(record(body)?.reason) === undefined ? '' : `, ${text(record(body)?.reason)}`}).`,
-        'SIGN_IN_REFUSED', { status: response.status })
-    }
-    const grant = parseGrant(body, this.now())
-    if (grant === undefined) throw new MediaError('The VibeDev gateway returned no tokens for the sign-in.', 'SIGN_IN_REFUSED')
-    await this.save(grant)
-    return grant
+    return active
   }
 
   /** Sign out: revoke the session at the gateway (best effort) and forget it. */
   async signOut(): Promise<void> {
+    const attemptId = this.attempt?.id
+    const pending = this.pending
+    if (pending?.committing) await pending.done.catch(() => undefined)
+    else pending?.cancel('cancelled')
     await this.load()
     const grant = this.grant
-    this.pending?.cancel(new MediaError('The sign-in was cancelled.', 'SIGN_IN_CANCELLED'))
+    if (grant !== undefined) await this.save(undefined)
+    if (this.attempt?.id === attemptId && this.pending === undefined) {
+      this.attempt = undefined
+      this.notify()
+    }
     if (grant === undefined) return
-    await this.save(undefined)
     await this.post('/api/v1/vibedev/app-token/revoke', { refresh_token: grant.refreshToken }, grant.accessToken)
       .then(response => response.body?.cancel(), () => undefined)
   }
 
   /** Stop a waiting sign-in. */
   dispose(): void {
-    this.pending?.cancel(new MediaError('The plugin stopped before the sign-in finished.', 'SIGN_IN_CANCELLED'))
+    this.pending?.cancel('cancelled')
   }
 }

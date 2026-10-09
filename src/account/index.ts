@@ -20,7 +20,7 @@
 
 import type { ConnectionFetchRoute } from '@deepseek-ai/dsh-client-connection'
 import type { CredentialChain } from '../auth/credentials.js'
-import type { PluginGrant, PluginLogin } from '../auth/login.js'
+import type { PluginGrant, PluginLogin, SignInAttempt } from '../auth/login.js'
 
 /** Path prefix of the plugin's Host routes. */
 export const ACCOUNT_ROUTE_PREFIX = '/api/dsh-vibedev/account'
@@ -40,6 +40,8 @@ export interface AccountView {
   readonly balance?: { readonly amount: string; readonly currency: string }
   /** A sign-in waiting for the browser. */
   readonly pending?: { readonly url: string; readonly expiresAt: number }
+  /** Safe sign-in progress or the most recent terminal diagnostic. */
+  readonly attempt?: SignInAttempt
   /** VibeDev chat models the pickers list now, and why there are none. */
   readonly models: { readonly count: number; readonly hidden?: 'signed-out' | 'host-account' }
   /** Pages on the gateway's site. */
@@ -94,9 +96,11 @@ export class AccountService {
     const credential = await this.options.chain.resolve().catch(() => undefined)
     const source: AccountSource = credential === undefined ? 'none' : credential.kind === 'account' ? 'host' : credential.kind
     const pending = this.options.login.pendingSignIn()
+    const attempt = this.options.login.signInAttempt()
     const base = {
       source, models: this.options.models(), links: this.links(), primary: this.options.primary === true,
       ...pending === undefined ? {} : { pending },
+      ...attempt === undefined ? {} : { attempt },
     }
     if (credential === undefined) return base
     const grantUser = credential.kind === 'plugin' ? await this.options.login.user().catch(() => undefined) : undefined
@@ -182,8 +186,14 @@ function json(status: number, body: unknown): Response {
 }
 
 function failure(error: unknown): Response {
-  const code = text(record(error)?.code) ?? 'INTERNAL'
-  return json(500, { error: { code, message: error instanceof Error ? error.message : String(error) } })
+  const candidate = record(error)?.code
+  // Even an unexpected storage/listener error may contain tokens, URLs or paths.
+  // Keep legacy route codes, but never copy arbitrary codes, messages or causes.
+  const code = candidate === 'SIGN_IN_REFUSED' || candidate === 'SIGN_IN_TIMEOUT' || candidate === 'SIGN_IN_CANCELLED' ? candidate : 'INTERNAL'
+  const message = code === 'SIGN_IN_CANCELLED' ? 'Sign-in was cancelled. 登录已取消。'
+    : code === 'SIGN_IN_TIMEOUT' ? 'Sign-in expired. 登录已超时，请重新登录。'
+      : 'The account request could not be completed. 账号请求未完成，请查看登录诊断后重试。'
+  return json(500, { error: { code, message } })
 }
 
 /**

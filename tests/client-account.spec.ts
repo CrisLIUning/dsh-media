@@ -72,13 +72,13 @@ describe('AccountStore', () => {
     expect(opened).toEqual([])
   })
 
-  it('reports a sign-in that could not start', async () => {
+  it('reports a sign-in that could not start without exposing untrusted error text', async () => {
     const { store } = harness({
       [`POST ${ACCOUNT_ROUTE}/sign-in`]: () => Response.json({ error: { message: 'no port' } }, { status: 500 }),
       [`GET ${ACCOUNT_ROUTE}`]: () => Response.json(SIGNED_OUT),
     })
     await store.signIn()
-    expect(store.getSnapshot().actionError).toEqual({ kind: 'sign-in', message: 'no port' })
+    expect(store.getSnapshot().actionError).toEqual({ kind: 'sign-in', message: 'Sign-in request failed.' })
   })
 
   it('signs out and reads the account again; a refused sign-out is reported', async () => {

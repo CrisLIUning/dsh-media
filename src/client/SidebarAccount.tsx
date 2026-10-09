@@ -48,9 +48,10 @@ export function SidebarAccount({ t, store, wide }: { t: Translate; store: Accoun
     ]
     : pending
       ? [
-        { type: 'label', id: 'pending', text: t('pendingStatus') },
-        { id: 'open-pending', label: t('pendingLink') },
-        { id: 'cancel', label: t('cancelSignIn') },
+        { type: 'label', id: 'pending', text: view.attempt?.phase === 'committing' ? t('signInCommitting')
+          : view.attempt?.phase === 'exchanging' ? t('signInExchanging') : t('pendingStatus') },
+        ...view.attempt === undefined || view.attempt.phase === 'waiting-browser' ? [{ id: 'open-pending', label: t('pendingLink') }] : [],
+        { id: 'cancel', label: t('cancelSignIn'), disabled: view.attempt?.phase === 'committing' },
       ]
       : [
         { type: 'label', id: 'intro', text: t('sidebarIntro') },

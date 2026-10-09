@@ -10,11 +10,23 @@
  */
 
 /** Mirrors the Host's `AccountView` (src/account/index.ts). */
+export interface SignInAttempt {
+  readonly id: string
+  readonly phase: 'preparing' | 'waiting-browser' | 'exchanging' | 'committing' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
+  readonly expiresAt: number
+  readonly gatewayOrigin: string
+  readonly stage?: 'listen' | 'device' | 'redeem' | 'persist'
+  readonly errorCode?: 'network' | 'timeout' | 'gateway-refused' | 'gateway-unavailable' | 'protocol' | 'storage' | 'callback'
+  readonly httpStatus?: number
+  readonly networkCode?: string
+}
+
 export interface AccountView {
   readonly source: 'host' | 'plugin' | 'key' | 'none'
   readonly user?: { readonly id?: string; readonly email?: string; readonly nickname?: string }
   readonly balance?: { readonly amount: string; readonly currency: string }
   readonly pending?: { readonly url: string; readonly expiresAt: number }
+  readonly attempt?: SignInAttempt
   readonly models: { readonly count: number; readonly hidden?: 'signed-out' | 'host-account' }
   readonly links: { readonly topUp: string; readonly register: string; readonly usage: string }
   /** The VibeDev account is the app's main account (absent from older Hosts: not). */
@@ -154,8 +166,8 @@ export class AccountStore {
         throw new Error(typeof body?.error?.message === 'string' ? body.error.message : `HTTP ${response.status}`)
       }
       if (body.opened !== true) this.options.openWindow?.(body.url)
-    } catch (error) {
-      this.set({ actionError: { kind: 'sign-in', message: error instanceof Error ? error.message : String(error) } })
+    } catch {
+      this.set({ actionError: { kind: 'sign-in', message: 'Sign-in request failed.' } })
     } finally {
       this.set({ busy: undefined })
       await this.refresh()

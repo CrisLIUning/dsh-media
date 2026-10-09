@@ -12,6 +12,7 @@ const ORIGIN = 'https://gw.test'
 function bench(credential: GatewayCredential | undefined, options: { user?: PluginGrant['user']; me?: () => Response; primary?: boolean } = {}) {
   let current = credential
   const login = {
+    signInAttempt: vi.fn(() => undefined),
     pendingSignIn: vi.fn((): { url: string; expiresAt: number } | undefined => undefined),
     user: vi.fn(() => Promise.resolve(options.user)),
     startSignIn: vi.fn((_request?: { open?: boolean }) => Promise.resolve({ url: `${ORIGIN}/vibedev-link?state=s`, expiresAt: 1_000, opened: false, done: new Promise<never>(() => {}) })),

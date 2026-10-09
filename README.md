@@ -167,6 +167,12 @@ Everything is paid from your VibeDev balance; the DeepSeek account stays DeepSee
 
 **Third-party code**: the model route in `src/llm/` is ported from the VibeDev app; `context.ts`, `replay.ts` and `stream.ts` are copied from DeepSeek Harness's `@deepseek-ai/dsh-llm-pi-ai` (MIT). The licences of the bundled pi-ai, Anthropic SDK, OpenAI SDK and their dependencies are in `THIRD-PARTY-NOTICES.txt`.
 
+## Login diagnostics (0.2.8-us.3) · 登录诊断
+
+登录状态区分等待浏览器、交换登录凭据、保存凭据与成功、失败、取消、过期；设置页面和新版 VibeDev Next 欢迎页显示网络、超时、授权拒绝、服务不可用、响应异常、本地存储或回调错误。折叠的诊断信息及 Host 日志只记录尝试编号、阶段、目标 origin、HTTP 状态和受控网络错误码，不记录账号密码、授权码、PKCE verifier、token、响应正文或完整回调链接。保持 PKCE、state 与随机 localhost 回调；交换失败不会自动重发或切换网关。美国网页公开配置仍需服务维护方单独核对。
+
+Login distinguishes waiting for the browser, exchanging credentials, saving credentials, and successful, failed, cancelled or expired outcomes. Settings and the updated VibeDev Next welcome page show classified failures. Collapsible support details and Host logs contain only the attempt reference, phase, origin, HTTP status and allowlisted network codes. Passwords, authorization codes, PKCE verifiers, tokens, response bodies and full callback URLs are excluded. PKCE, state and the random localhost callback remain; a failed exchange is never automatically repeated or sent to another gateway. The gateway operator must separately verify the American web page's public configuration.
+
 ## Maintainer releases
 
 Build, typecheck and test locally, pack the tested archive, tag the matching source version, and publish a GitHub Release with `vibedev-si-dsh-vibedev-<version>.tgz` attached. `.github/workflows/publish.yml` publishes that exact archive with npm OIDC; it does not rebuild the package. The job checks the source/tag/archive identities and Release asset digest, refuses an existing version with different bytes, and skips an identical already-published version. It verifies the complete npm tarball after publication. For a manual retry of an unpublished version, run the workflow on the version's tag ref.

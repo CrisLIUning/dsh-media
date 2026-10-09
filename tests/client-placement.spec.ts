@@ -15,6 +15,29 @@ vi.mock('@deepseek-ai/dsh-client-ui-primitives', () => {
 })
 
 const { apply } = await import('../src/client/index.js')
+const { statusDot } = await import('../src/client/AccountSection.tsx')
+const { failureKey, safeSupportDetails } = await import('../src/client/sign-in-presentation.ts')
+
+describe('classified account presentation', () => {
+  it('uses localized failure keys and only selected diagnostic fields', () => {
+    const attempt = {
+      id: 'login-safe', phase: 'failed' as const, expiresAt: 9000, gatewayOrigin: 'https://api.vibedev.studio/path?token=private',
+      errorCode: 'gateway-unavailable' as const, stage: 'redeem' as const, httpStatus: 503, networkCode: 'private-token',
+      message: 'private-password', code_verifier: 'private-verifier',
+    }
+    expect(failureKey(attempt)).toBe('signInUnavailable')
+    expect(safeSupportDetails(attempt)).toBe('gateway-unavailable · redeem · HTTP 503 · https://api.vibedev.studio · login-safe')
+    expect(failureKey({ ...attempt, phase: 'exchanging' })).toBeUndefined()
+    expect(failureKey({ ...attempt, phase: 'expired' })).toBe('signInExpired')
+  })
+
+  it('shows a failed login as an error rather than an ordinary signed-out state', () => {
+    expect(statusDot({ view: {
+      source: 'none', models: { count: 0 }, links: { topUp: '', register: '', usage: '' },
+      attempt: { id: 'login-safe', phase: 'failed', expiresAt: 9000, gatewayOrigin: 'https://api.vibedev.studio', errorCode: 'network' },
+    }, loadFailed: false, busy: undefined, actionError: undefined })).toBe('error')
+  })
+})
 
 const LINKS = { topUp: 'https://gw.test/purchase', register: 'https://gw.test', usage: 'https://gw.test/usage' }
 
