@@ -114,6 +114,7 @@ export class AccountService {
         const response = await (this.options.fetch ?? globalThis.fetch)(`${this.options.origin}/v1/account/auth/me`, {
           headers: { accept: 'application/json', authorization: `Bearer ${token}`, 'user-agent': this.options.userAgent },
           signal: AbortSignal.timeout(15_000),
+          redirect: 'error',
         })
         if (!response.ok) return {}
         const body = record(await response.json().catch(() => undefined))

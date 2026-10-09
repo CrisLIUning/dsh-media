@@ -37,7 +37,7 @@ const noPaths = { readPath: () => Promise.reject(new MediaError('The gateway ret
 
 /**
  * Read the images of an `/v1/images/*` answer: `b64_json`, a `data:` URL, or a link.
- * @param runtime - for authenticated downloads of gateway links.
+ * @param runtime - for downloading the gateway's full signed result URLs.
  * @param body - the parsed answer.
  * @param signal - cancels downloads.
  * @returns the images and the revised prompt, when the model returned one.
@@ -59,7 +59,7 @@ async function decodeImages(runtime: MediaRuntime, body: unknown, signal: AbortS
       data = (await loadMedia(url, noPaths, MAX_OUTPUT_BYTES)).data
     } else if (url !== undefined && /^https?:\/\//i.test(url)) {
       const response = await runtime.http.send(url, {
-        anonymous: !runtime.http.isGatewayUrl(url), headers: { accept: '*/*' }, timeoutMs: 120_000, signal,
+        anonymous: true, headers: { accept: '*/*' }, timeoutMs: 120_000, signal,
       })
       const bytes = new Uint8Array(await response.arrayBuffer())
       if (bytes.byteLength > MAX_OUTPUT_BYTES) throw new MediaError('A generated image is larger than this plugin downloads.', 'OUTPUT_TOO_LARGE')

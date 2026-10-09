@@ -31,7 +31,7 @@ beforeEach(async () => {
     [`POST ${GATEWAY}/v1/media-assets/ma_1/complete`]: () => json(200, { asset_id: 'ma_1', reference_url: `${GATEWAY}/v1/media-assets/ma_1/content?sig=r`, content_type: 'image/png' }),
     [`POST ${GATEWAY}/v1/videos`]: () => json(200, { id: 'vid_1', status: 'queued', effective: { estimated_cny: '4.95' } }),
     [`GET ${GATEWAY}/v1/videos/vid_1`]: () => json(200, { id: 'vid_1', status: 'completed', video: { url: 'https://cdn.test/vid_1.mp4' }, effective: { estimated_cny: '4.95', charged_cny: '4.95' } }),
-    [`GET ${GATEWAY}/v1/videos/vid_1/content`]: () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } }),
+    ['GET https://cdn.test/vid_1.mp4']: () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } }),
   }
   vi.stubEnv('DSH_MEDIA_TEST_KEY', 'dev-key')
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {

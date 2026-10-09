@@ -36,7 +36,8 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-web'
 import Schema from '@deepseek-ai/schemastery'
 import { AccountService, accountRoutes } from './account/index.js'
-import { CredentialChain, GRANT_KEY, grantStorage } from './auth/credentials.js'
+import { CredentialChain, gatewayGrantKey, grantStorage } from './auth/credentials.js'
+import { DEFAULT_GATEWAY_ORIGIN, developmentKey, gatewayStateDirectory, normalizeGatewayOrigin } from './gateway/origin.js'
 import { PluginLogin, openInBrowser } from './auth/login.js'
 import { installGatewayModels } from './llm/index.js'
 import type { GatewayModels } from './llm/index.js'
@@ -118,7 +119,7 @@ export const Config = Schema.object({
   musicModel: Schema.string().default('').volatile(),
   podcastModel: Schema.string().default('').volatile(),
   transcriptionModel: Schema.string().default('').volatile(),
-  gatewayOrigin: Schema.string().default('https://vibedev.jzsaas.com'),
+  gatewayOrigin: Schema.string().default(DEFAULT_GATEWAY_ORIGIN),
   client: Schema.string().default('vibedev-plugin'),
   primary: Schema.boolean().default(false),
   apiKeyEnv: Schema.string().default('VIBEDEV_GATEWAY_API_KEY'),
@@ -170,12 +171,12 @@ const GUIDANCE = 'VibeDev media tools: image_generate, video_generate, audio_gen
   + 'carry on and let the job notification report the result.'
 
 export function apply(ctx: Context, config: Config): void {
-  const origin = config.gatewayOrigin.trim().replace(/\/+$/, '')
+  const origin = normalizeGatewayOrigin(config.gatewayOrigin)
   const stateDir = stateDirectory(config.stateDir)
   const userAgent = `vibedev-plugin/${version}`
   const warn = (message: string): void => { ctx.logger.warn(message) }
 
-  const storage = grantStorage(stateDir, () => ctx.get('credentials'))
+  const storage = grantStorage(stateDir, () => ctx.get('credentials'), origin)
   const login = new PluginLogin({
     origin, userAgent, log: warn, storage, client: config.client.trim() || 'vibedev-plugin',
     openBrowser: url => config.openBrowserOnSignIn ? openInBrowser(url) : Promise.resolve(false),
@@ -183,20 +184,20 @@ export function apply(ctx: Context, config: Config): void {
   // Service availability, not row order, determines when persisted records can be read.
   // Keep hosts without a credential provider supported, and restore when one arrives/reloads.
   ctx.inject(['credentials'], (scoped) => {
-    scoped.on('credentials/record-updated', (key) => { if (key === GRANT_KEY) void login.restore() })
+    scoped.on('credentials/record-updated', (key) => { if (key === gatewayGrantKey(origin)) void login.restore() })
     scoped.effect(async () => { await login.restore(); return () => {} }, 'dsh-vibedev: restore stored sign-in')
   })
   const chain = new CredentialChain({
     origin, plugin: login,
     account: () => ctx.get('deepseekAccount'),
-    apiKey: () => config.apiKeyEnv.trim() === '' ? undefined : process.env[config.apiKeyEnv.trim()]?.trim(),
+    apiKey: () => developmentKey(origin, config.apiKeyEnv),
   })
   const http = new GatewayHttp({
     origin, userAgent,
     resolveCredential: () => chain.resolve(),
     rejectToken: credential => chain.reject(credential),
   })
-  const store = new TaskStore(stateDir)
+  const store = new TaskStore(gatewayStateDirectory(stateDir, origin))
   const tracker = new TaskTracker({ http, store, log: warn })
   const slots: Readonly<Record<ModelSlot, Volatile<string>>> = {
     image: config.imageModel, video: config.videoModel, music: config.musicModel,

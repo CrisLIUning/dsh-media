@@ -33,7 +33,7 @@ beforeEach(async () => {
     [`POST ${GATEWAY}/v1/media-assets/ma_1/complete`]: () => json(200, { asset_id: 'ma_1', reference_url: `${GATEWAY}/v1/media-assets/ma_1/content?sig=r`, content_type: 'image/png' }),
     [`POST ${GATEWAY}/v1/videos`]: () => json(200, { id: 'vid_1', status: 'queued', effective: { estimated_cny: '4.95' } }),
     [`GET ${GATEWAY}/v1/videos/vid_1`]: () => json(200, { id: 'vid_1', status: 'completed', video: { url: 'https://cdn.test/vid_1.mp4' }, effective: { estimated_cny: '4.95', charged_cny: '4.95' } }),
-    [`GET ${GATEWAY}/v1/videos/vid_1/content`]: () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } }),
+    ['GET https://cdn.test/vid_1.mp4']: () => new Response(MP4, { headers: { 'content-type': 'video/mp4' } }),
   }
   vi.stubEnv('DSH_MEDIA_TEST_KEY', 'dev-key')
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
@@ -93,6 +93,17 @@ describe('dsh-media plugin', () => {
     const request = seen.find(item => item.url.endsWith('/v1/images/generations'))
     expect(JSON.parse(request?.body as string)).toEqual({ model: 'gpt-image-2.5-flare', prompt: 'a red apple', n: 1 })
     await ctx.fiber.dispose()
+  })
+
+  it.each([`${GATEWAY}/image%2Fout.png?sig=a%2B%2F&expires=99`, 'https://media.vibedev.studio/image%2Fout.png?sig=a%2B%2F&expires=99'])('downloads a signed image URL verbatim without an app token: %s', async (url) => {
+    routes[`POST ${GATEWAY}/v1/images/generations`] = () => json(200, { data: [{ url }] })
+    routes[`GET ${url}`] = () => new Response(PNG)
+    const { ctx, run } = await load()
+    try {
+      expect((await run('image_generate', { prompt: 'fixture', filename: 'signed' })).isError).toBe(false)
+      expect(seen.find(request => request.url === url)?.headers.authorization).toBeUndefined()
+      expect(new Uint8Array(await readFile(join(dir, 'outputs', 'media', 'images', 'signed.png')))).toEqual(PNG)
+    } finally { await ctx.fiber.dispose() }
   })
 
   it('uploads a reference, submits the video and saves the result', async () => {

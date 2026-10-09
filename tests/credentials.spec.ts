@@ -54,7 +54,7 @@ describe('CredentialChain', () => {
 })
 
 describe('grantStorage', () => {
-  const grant = { accessToken: 'vdat_1', refreshToken: 'vdrt_1', expiresAt: 1, refreshExpiresAt: 2 }
+  const grant = { gatewayOrigin: 'https://vibedev.jzsaas.com', accessToken: 'vdat_1', refreshToken: 'vdrt_1', expiresAt: 1, refreshExpiresAt: 2 }
 
   it('keeps the grant in the host credential store as an opaque record', async () => {
     const records = new Map<string, CredentialRecord>()

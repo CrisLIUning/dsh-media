@@ -604,13 +604,12 @@ export class TaskTracker {
     return { outputs, missing }
   }
 
-  /** Download one output: the authenticated `/content` route, then the gateway's no-login link. */
+  /** Use a returned signed URL verbatim and without the app token; old gateways without a URL use `/content`. */
   private async fetchOutput(record: TaskRecord, task: RemoteTask, output: RemoteOutput, temporary: string): Promise<number> {
     const spec = SPECS[record.kind]
     const sources: Array<{ url: string; anonymous: boolean }> = []
-    if (record.kind === 'video') sources.push({ url: spec.content(task.id, output.index), anonymous: false })
     if (output.url !== undefined) sources.push({ url: output.url, anonymous: true })
-    if (record.kind === 'audio') sources.push({ url: spec.content(task.id, output.index), anonymous: false })
+    else sources.push({ url: spec.content(task.id, output.index), anonymous: false })
     let lastError: unknown = new MediaError('The gateway named no file to download.', 'OUTPUT_URL_MISSING')
     for (const source of sources) {
       for (let attempt = 0; attempt < 3; attempt++) {

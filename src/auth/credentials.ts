@@ -14,6 +14,7 @@ import { credentialKey } from '@deepseek-ai/dsh-credentials'
 import type { DeepSeekAccount } from '@deepseek-ai/dsh-deepseek-account'
 import type { GatewayCredential } from '../gateway/http.js'
 import { writeFileAtomic } from '../util/files.js'
+import { DEFAULT_GATEWAY_ORIGIN, gatewayId, gatewayStateDirectory, normalizeGatewayOrigin } from '../gateway/origin.js'
 import type { GrantChange, GrantStorage, PluginGrant, PluginLogin } from './login.js'
 
 /** Where a credential came from, for status lines. */
@@ -61,6 +62,11 @@ export class CredentialChain {
 // Named after the plugin's former name, dsh-media: keeping the key lets an upgrade keep the sign-in.
 export const GRANT_KEY = credentialKey('dsh-media', 'vibedev-session')
 
+/** Credential identity for one gateway; never consult another gateway's record. */
+export function gatewayGrantKey(origin: string) {
+  return normalizeGatewayOrigin(origin) === DEFAULT_GATEWAY_ORIGIN ? GRANT_KEY : credentialKey('dsh-vibedev', `gateway-${gatewayId(origin)}`)
+}
+
 function isGrant(value: unknown): value is PluginGrant {
   const grant = value as PluginGrant | undefined
   return typeof grant === 'object' && grant !== null && typeof grant.accessToken === 'string' && typeof grant.refreshToken === 'string'
@@ -71,11 +77,21 @@ function isGrant(value: unknown): value is PluginGrant {
  * Grant storage: the host's credential store when one is loaded (a grant
  * record the store keeps verbatim), else a private file in the state
  * directory. The device id is not a secret and lives in the state directory.
- * @param stateDir - the plugin state directory.
+ * @param root - the plugin state root; the storage selects an origin-specific directory itself.
  * @param credentials - the host's credential store, when loaded.
+ * @param selectedOrigin - the issuing gateway; historical unmarked state is domestic only.
  * @returns the storage.
  */
-export function grantStorage(stateDir: string, credentials: () => CredentialProvider | undefined): GrantStorage {
+export function grantStorage(root: string, credentials: () => CredentialProvider | undefined, selectedOrigin = DEFAULT_GATEWAY_ORIGIN): GrantStorage {
+  const origin = normalizeGatewayOrigin(selectedOrigin)
+  const key = gatewayGrantKey(origin)
+  const stateDir = gatewayStateDirectory(root, origin)
+  const readGrant = (value: unknown): PluginGrant | undefined => isGrant(value)
+    && (value.gatewayOrigin === origin || value.gatewayOrigin === undefined && origin === DEFAULT_GATEWAY_ORIGIN) ? value : undefined
+  const bind = (grant: PluginGrant): PluginGrant => {
+    if (grant.gatewayOrigin !== undefined && grant.gatewayOrigin !== origin) throw new Error('Cannot store a grant issued by another gateway.')
+    return { ...grant, gatewayOrigin: origin }
+  }
   const sessionFile = join(stateDir, 'session.json')
   const deviceFile = join(stateDir, 'device.json')
   let device: Promise<string> | undefined
@@ -86,11 +102,11 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
       throw error
     }
     const parsed: unknown = JSON.parse(text) as unknown
-    return isGrant(parsed) ? parsed : undefined
+    return readGrant(parsed)
   }
   // Owner-only from creation: the temporary file is written with this mode before the rename.
   const writeFileGrant = (grant: PluginGrant | undefined) =>
-    writeFileAtomic(sessionFile, new TextEncoder().encode(grant === undefined ? 'null' : JSON.stringify(grant)), { mode: 0o600 })
+    writeFileAtomic(sessionFile, new TextEncoder().encode(grant === undefined ? 'null' : JSON.stringify(bind(grant))), { mode: 0o600 })
   const clearFileGrant = async (): Promise<void> => {
     try { await stat(sessionFile) } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
@@ -103,9 +119,9 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
     try { await clearFileGrant() } catch { /* A valid host record remains authoritative; retry cleanup on the next read. */ }
   }
   const readHostGrant = async (store: CredentialProvider): Promise<PluginGrant | undefined> => {
-    const stored = await store.readRecord(GRANT_KEY)
+    const stored = await store.readRecord(key)
     if (stored !== undefined) {
-      const grant = stored.kind === 'grant' && isGrant(stored.payload) ? stored.payload : undefined
+      const grant = stored.kind === 'grant' ? readGrant(stored.payload) : undefined
       if (grant !== undefined) await clearFileGrantQuietly()
       return grant
     }
@@ -115,14 +131,14 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
       throw error
     }
     let adopted: PluginGrant | undefined
-    await store.modifyRecord(GRANT_KEY, async (current) => {
+    await store.modifyRecord(key, async (current) => {
       if (current !== undefined) {
-        adopted = current.kind === 'grant' && isGrant(current.payload) ? current.payload : undefined
+        adopted = current.kind === 'grant' ? readGrant(current.payload) : undefined
         return undefined
       }
       // A concurrent sign-out may have cleared the fallback while this mutation waited for the lock.
       adopted = await readFileGrant()
-      return adopted === undefined ? undefined : { kind: 'grant', payload: adopted }
+      return adopted === undefined ? undefined : { kind: 'grant', payload: bind(adopted) }
     })
     if (adopted !== undefined) await clearFileGrantQuietly()
     return adopted
@@ -137,9 +153,9 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
       if (store !== undefined) {
         if (grant === undefined) {
           await clearFileGrant()
-          await store.deleteRecord(GRANT_KEY)
+          await store.deleteRecord(key)
         } else {
-          await store.modifyRecord(GRANT_KEY, () => Promise.resolve({ kind: 'grant', payload: grant }))
+          await store.modifyRecord(key, () => Promise.resolve({ kind: 'grant', payload: bind(grant) }))
           await clearFileGrantQuietly()
         }
         return
@@ -152,13 +168,13 @@ export function grantStorage(stateDir: string, credentials: () => CredentialProv
         await readHostGrant(store)
         // The credential store serializes this read-modify-write across processes.
         let remove = false
-        await store.modifyRecord(GRANT_KEY, async (current) => {
-          const result = await change(current?.kind === 'grant' && isGrant(current.payload) ? current.payload : undefined)
-          if (result.kind === 'set') return { kind: 'grant', payload: result.grant }
+        await store.modifyRecord(key, async (current) => {
+          const result = await change(current?.kind === 'grant' ? readGrant(current.payload) : undefined)
+          if (result.kind === 'set') return { kind: 'grant', payload: bind(result.grant) }
           remove = result.kind === 'delete'
           return undefined
         })
-        if (remove) { await clearFileGrant(); await store.deleteRecord(GRANT_KEY) }
+        if (remove) { await clearFileGrant(); await store.deleteRecord(key) }
         return
       }
       // The file fallback has no cross-process lock; reading right before the change narrows the window.

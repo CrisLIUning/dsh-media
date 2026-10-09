@@ -9,9 +9,7 @@ import { SettingsForm, SettingsValueField, Switch } from '@deepseek-ai/dsh-clien
 import type { SettingsFieldState, SettingsFormActions, SettingsFormShell } from '@deepseek-ai/dsh-client-ui-primitives'
 import { MODEL_FIELDS, type MediaSettingsField } from './fields.ts'
 import type { MediaSettingsKey } from './locales.ts'
-
-/** Where new users register and everyone tops up. */
-const VIBEDEV_SITE = 'https://vibedev.jzsaas.com'
+import type { AccountStore } from './account-store.ts'
 
 /** What the page renders, rebuilt whenever the Host values or a staged edit change. */
 export interface PageState {
@@ -54,11 +52,12 @@ function Section(props: { first?: boolean; title: string; hint?: string; childre
 
 /**
  * Render the settings page.
- * @param props - the dictionary, the form store and its actions.
+ * @param props - the dictionary, form store, actions and selected gateway account view.
  * @returns the page.
  */
-export function MediaSettingsPage({ t, store, actions }: { t: Translate; store: PageStore; actions: SettingsFormActions }) {
+export function MediaSettingsPage({ t, store, actions, account }: { t: Translate; store: PageStore; actions: SettingsFormActions; account: AccountStore }) {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot)
+  const site = useSyncExternalStore(account.subscribe, account.getSnapshot).view?.links.register
   if (state.status === 'loading') return <p style={styles.quiet} role="status">{t('loading')}</p>
   const disabled = !state.shell.writable || state.shell.saving
   const textField = (field: MediaSettingsField) => ({
@@ -103,7 +102,7 @@ export function MediaSettingsPage({ t, store, actions }: { t: Translate; store: 
       </Section>
       <Section title={t('account')}>
         <p style={styles.hint}>{t('accountHint')}</p>
-        <a style={styles.link} href={VIBEDEV_SITE} target="_blank" rel="noreferrer">{t('register')}</a>
+        {site === undefined ? null : <a style={styles.link} href={site} target="_blank" rel="noreferrer">{t('register')}</a>}
       </Section>
     </SettingsForm>
   )

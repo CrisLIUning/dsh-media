@@ -296,7 +296,9 @@ export class GatewayAdapter extends LlmAdapter {
         // pi-ai reports a failed request only as text, and calls `onResponse` for successful ones alone;
         // wrapping fetch sees every response, so a failure keeps its status and request id.
         const observingFetch = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
-          const received = await fetch(input, init)
+          const url = input instanceof Request ? input.url : String(input)
+          if (new URL(url).origin !== snapshot.origin) throw new Error('Refusing a model request to another gateway origin.')
+          const received = await fetch(input, { ...init, redirect: 'error' })
           response = { status: received.status, headers: Object.fromEntries(received.headers.entries()) }
           return received
         }

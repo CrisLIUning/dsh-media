@@ -12,9 +12,6 @@ import type { CredentialChain } from '../auth/credentials.js'
 import type { PluginLogin } from '../auth/login.js'
 import type { MediaRuntime } from '../runtime.js'
 
-/** Where new users register. */
-export const REGISTER_URL = 'https://vibedev.jzsaas.com'
-
 /**
  * Build the tool.
  * @param runtime - the media runtime.
@@ -76,7 +73,7 @@ export function mediaAccountTool(runtime: MediaRuntime, chain: CredentialChain, 
         source, signInUrl: started.url,
         message: `${started.opened ? 'Opened the VibeDev sign-in page in the user\'s browser.' : 'Could not open a browser.'} `
           + `If it did not appear, give the user this link: ${started.url} — `
-          + `new users can register on that page (or at ${REGISTER_URL}). The sign-in completes in the background within ${minutes} minutes; `
+          + `new users can register on that page (or at ${runtime.http.origin}). The sign-in completes in the background within ${minutes} minutes; `
           + 'once the user says they are done, retry the request.',
       }
     },

@@ -62,11 +62,11 @@ describe('TaskTracker', () => {
     expect(final).toMatchObject({ status: 'completed', chargedCny: '4.95', outputs: [{ path: join(dir, 'out', 'cat.mp4'), bytes: MP4.byteLength, durationSeconds: 5.04, url: 'https://cdn.example.com/vid_1.mp4' }] })
     expect(new Uint8Array(await readFile(join(dir, 'out', 'cat.mp4')))).toEqual(MP4)
     expect(seen.map(request => `${request.method} ${request.url}`)).toEqual([
-      `POST ${ORIGIN}/v1/videos`, `GET ${ORIGIN}/v1/videos/vid_1`, `GET ${ORIGIN}/v1/videos/vid_1`, `GET ${ORIGIN}/v1/videos/vid_1/content`,
+      `POST ${ORIGIN}/v1/videos`, `GET ${ORIGIN}/v1/videos/vid_1`, `GET ${ORIGIN}/v1/videos/vid_1`, 'GET https://cdn.example.com/vid_1.mp4',
     ])
     expect(seen[0]?.headers['idempotency-key']).toBe('task-video')
     expect(bodyOf(seen[0])).toEqual({ model: 'm', prompt: 'a cat' })
-    expect(seen[3]?.headers.authorization).toBe('Bearer tok')
+    expect(seen[3]?.headers.authorization).toBeUndefined()
     expect(progress).toEqual(['queued', 'in progress 40%', 'saving the result'])
     expect(waits).toEqual([6_000])
     expect((await store.get('task-video'))?.status).toBe('completed')
@@ -258,14 +258,14 @@ describe('TaskTracker', () => {
   })
 
   it('retries a failed download before reporting the links instead', async () => {
-    const { fetch } = fakeFetch(completed('vid_12'), new Response('gone', { status: 404 }), new Response('gone', { status: 404 }), completed('vid_12'), new Response(MP4))
+    const { fetch } = fakeFetch(completed('vid_12'), new Response('gone', { status: 404 }), completed('vid_12'), new Response(MP4))
     const { tracker, store } = setup(fetch, { downloadAttempts: 2 })
     await store.add(draft('video', { id: 'v12', status: 'pending', gatewayId: 'vid_12' }))
     const final = await tracker.follow('v12')
     expect(final).toMatchObject({ status: 'completed', outputs: [{ path: join(dir, 'out', 'cat.mp4') }] })
     expect(final.error).toBeUndefined()
 
-    const gone = fakeFetch(completed('vid_13'), new Response('gone', { status: 404 }), new Response('gone', { status: 404 }))
+    const gone = fakeFetch(completed('vid_13'), new Response('gone', { status: 404 }))
     const once = setup(gone.fetch, { downloadAttempts: 1, store })
     await store.add(draft('video', { id: 'v13', status: 'pending', gatewayId: 'vid_13' }))
     expect(await once.tracker.follow('v13')).toMatchObject({

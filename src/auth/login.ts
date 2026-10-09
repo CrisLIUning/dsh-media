@@ -23,6 +23,8 @@ import { MediaError } from '../gateway/errors.js'
 
 /** A stored plugin session. */
 export interface PluginGrant {
+  /** Origin that issued this stored app grant; legacy unmarked grants belong to the domestic gateway only. */
+  readonly gatewayOrigin?: string
   readonly accessToken: string
   readonly refreshToken: string
   /** Epoch ms. */
@@ -313,6 +315,7 @@ export class PluginLogin {
         ...token === undefined ? {} : { authorization: `Bearer ${token}` },
       },
       body: JSON.stringify(json),
+      redirect: 'error',
       signal: AbortSignal.timeout(30_000),
     })
   }

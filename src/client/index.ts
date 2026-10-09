@@ -156,7 +156,7 @@ export function apply(ctx: ClientContext): void {
         key: PACKAGE_NAME,
         locale: LOCALE_NAMESPACE,
         inject: () => ({ t }),
-      }, (owner = {}) => owner.view === 'summary' ? null : h(MediaSettingsPage, { t, store, actions })))
+      }, (owner = {}) => owner.view === 'summary' ? null : h(MediaSettingsPage, { t, store, actions, account })))
       // As the app's main account the plugin is built in and not listed on the Plugins page, so the same page
       // gets a Settings section of its own, right after the account's.
       let section: (() => void) | undefined
@@ -168,7 +168,7 @@ export function apply(ctx: ClientContext): void {
           order: PRIMARY_SECTION_ORDER + 1,
           label: () => t('mediaNav'),
           locale: LOCALE_NAMESPACE,
-        }, () => h(MediaSettingsPage, { t, store, actions }))))
+        }, () => h(MediaSettingsPage, { t, store, actions, account }))))
       }
       const unsubscribe = account.subscribe(placeSection)
       placeSection()

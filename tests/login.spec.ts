@@ -4,7 +4,8 @@ import { PluginLogin, parseGrant } from '../src/auth/login.js'
 import type { GrantChange, GrantStorage, PluginGrant } from '../src/auth/login.js'
 import { bodyOf, fakeFetch, json } from './helpers.js'
 
-const ORIGIN = 'https://vibedev.example.com'
+// The gateway is mocked; only the existing random localhost callback uses a real socket.
+const ORIGIN = 'https://api.vibedev.studio'
 const NOW = Date.parse('2026-10-03T10:00:00Z')
 
 function memory(initial?: PluginGrant): GrantStorage & { current: PluginGrant | undefined } {

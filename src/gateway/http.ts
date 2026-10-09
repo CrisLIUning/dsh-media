@@ -192,7 +192,7 @@ export class GatewayHttp {
         method: request.method ?? (body === undefined ? 'GET' : 'POST'),
         headers,
         ...body === undefined ? {} : { body: body as NonNullable<RequestInit['body']> },
-        redirect: 'follow',
+        redirect: 'error',
         signal,
       })
     } catch (error) {

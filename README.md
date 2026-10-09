@@ -43,6 +43,12 @@
 
 ## VibeDev 的模型
 
+本地候选版 0.2.8-us.1 准备了美国网关迁移，正式默认仍为 `https://vibedev.jzsaas.com`。显式选择 `gatewayOrigin: https://api.vibedev.studio` 后必须重新登录，才会获取该站模型；登录仍使用 S256 PKCE、state、随机 localhost 回调和 app token，不使用共享 HMAC secret。充值、注册、用量链接跟随所选 API origin，网页搜索也使用该 API 的 `/v1/vibedev/web-search`。
+
+凭据键、设备记录和媒体任务目录按规范化 gateway origin 隔离。只有历史国内地址沿用原 `dsh-media/vibedev-session` 与数据目录；美国和其它地址使用独立命名空间，不导入旧会话或恢复、重新提交旧视频、音频与上传状态。未标注 origin 的历史记录仅归国内地址；以前自定义其它地址的用户需要重新登录。DeepSeek 等其它账号、聊天、工作区及历史媒体 URL 不改写。切回国内仍可读到国内原记录。
+
+媒体创建、完成、刷新请求走所选 API；上传和下载使用服务器返回的完整签名 URL，保留 host、path、query，不携带 VibeDev app token。返回签名链接时下载不再先探测旧 `/content` 接口；未返回链接的旧接口仍可直接返回文件。API 和下载请求拒绝重定向，不把失败或503当作跨区域重发理由。现有同站同键重试、SSE、心跳和取消语义保留。旧 `VIBEDEV_GATEWAY_API_KEY` 环境变量仅用于国内；桌面登录路线禁用该回退。
+
 - 模型列表来自 VibeDev 网关，按你的账号下发，所以**未登录时不显示**，登录后立即出现，不用重启。
 - 模型在选择器里的「VibeDev」组；默认模型仍是 DeepSeek Harness 原来的，想用 VibeDev 的模型就在选择器里选。
 - 没登录就用了 VibeDev 的模型，或登录已失效时，对话里会提示到侧边栏或设置里登录；余额不足时会提示并给出充值链接。这些提示和 DeepSeek 账号的登录、充值提示是分开的。
@@ -125,6 +131,8 @@ npm run build
 ---
 
 ## English
+
+**US candidate preparation (0.2.8-us.1)**: production still defaults to `https://vibedev.jzsaas.com`. An explicit `gatewayOrigin: https://api.vibedev.studio` starts signed out and requires a new app-token login before listing models. Credentials, devices and durable media tasks are scoped by canonical origin; only the historical domestic origin may read unmarked legacy state. Switching does not resume or resubmit foreign tasks, alter other accounts, chats or workspaces, or rewrite historical media URLs. API control requests and web search follow the selected origin; uploads/downloads preserve the server's complete signed URL without an app token. Redirects and cross-region fallback are refused. Existing S256 PKCE, state, random localhost callback, SSE, heartbeats, cancellation and same-origin idempotency remain. The legacy shared development-key environment variable is domestic only; desktop account mode disables it. This candidate does not remove the gateway's 503 gate or initiate a production cutover.
 
 Sign in to VibeDev in DeepSeek Harness, next to the DeepSeek account:
 
