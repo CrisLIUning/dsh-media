@@ -3,6 +3,6 @@ node_modules/
 /client/
 coverage/
 *.tgz
-!/bundled/vibedev-si-dsh-vibedev-0.2.8-us.3.tgz
+!/bundled/vibedev-si-dsh-vibedev-0.3.0.tgz
 .DS_Store
 /THIRD-PARTY-NOTICES.txt
